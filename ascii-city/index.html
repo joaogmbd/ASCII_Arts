@@ -102,7 +102,7 @@ const CFG = {
   LAMP_H_MIN:   4.2,   // poste nunca é infinitamente alto
   LAMP_H_MAX:   6.2,
   EYE:          1.70,
-  FOG:          105,   // alcance de visão
+  FOG:          105,   // alcance de visão inicial
   LIGHT_R:      17     // raio máximo de uma luz (casa com o bucket)
 };
 const HALF_ST = CFG.STREET_W / 2;
@@ -415,7 +415,7 @@ function makeBlock(i, j){
     height: new Uint8Array(w * d),
     lotId:  new Uint8Array(w * d),
     mat:    new Uint8Array(w * d),
-    lots: [], lamps: [], bbs: [], lights: [], trees: [], beacons: [],
+    lots: [], lamps: [], bbs: [], lights: [], trees: [], beacons: [], doors: [],
     park: false
   };
 
@@ -445,6 +445,7 @@ function makeBlock(i, j){
       const lot = newLot(B, seed, k, r[0], r[1], r[2], r[3], floorsFor(dist, seed, k));
       paintRect(B, lot);
       addBillboards(B, lot, bx0, bz0, bx1, bz1);
+      addDoors(B, lot, bx0, bz0, bx1, bz1);
     });
 
   } else if (kind === "patio"){
@@ -457,7 +458,7 @@ function makeBlock(i, j){
       splitLots(bx0, bz0, bx1, bz1, 0, seed, rects);
       rects.forEach((r, k) => {
         const lot = newLot(B, seed, k, r[0], r[1], r[2], r[3], floorsFor(dist, seed, k));
-        paintRect(B, lot); addBillboards(B, lot, bx0, bz0, bx1, bz1);
+        paintRect(B, lot); addBillboards(B, lot, bx0, bz0, bx1, bz1); addDoors(B, lot, bx0, bz0, bx1, bz1);
       });
     } else {
       const bands = [[bx0, bz0, bx1, pz0], [bx0, pz1, bx1, bz1],
@@ -466,6 +467,7 @@ function makeBlock(i, j){
         const lot = newLot(B, seed, k, r[0], r[1], r[2], r[3], floorsFor(dist, seed, k + 3));
         paintRect(B, lot);
         addBillboards(B, lot, bx0, bz0, bx1, bz1);
+        addDoors(B, lot, bx0, bz0, bx1, bz1);
       });
       paintMat(B, px0, pz0, px1, pz1, MAT_VERDE);
       scatterTrees(B, seed, px0, pz0, px1, pz1, 2 + Math.floor(hash3(i, j, seed ^ 3) * 4));
@@ -569,6 +571,10 @@ function makeBlock(i, j){
     B.lights.push({ x: L.x, y: L.h, z: L.z, r: L.r, g: L.g, b: L.b,
                     rad: 13, inten: 1.15, baseInten: 1.15, lamp: true });
   }
+  for (const d of B.doors){
+    B.lights.push({ x: d.ox, y: 1.6, z: d.oz, r: 1.0, g: 0.76, b: 0.42,
+                    rad: 7, inten: 0.85, baseInten: 0.85, lamp: true });
+  }
   for (const bc of B.beacons){
     B.lights.push({ x: bc.x, y: bc.y, z: bc.z, r: 1.0, g: 0.22, b: 0.18,
                     rad: 9, inten: 0.9, baseInten: 0.9, beacon: bc });
@@ -588,6 +594,32 @@ function makeBlock(i, j){
     });
   }
   return B;
+}
+
+/** Porta de acesso à cobertura, só em prédio alto e em fachada que dá para
+ *  a rua. Guarda o ponto na calçada e o ponto na laje, que é para onde o
+ *  jogador é levado — e de onde ele volta. */
+function addDoors(B, lot, bx0, bz0, bx1, bz1){
+  if (!lot.rect || lot.h < 24) return;
+  const faces = [];
+  if (lot.x0 === bx0) faces.push({ axis: 0, plane: lot.x0, nrm: -1, a: lot.z0, b: lot.z1 });
+  if (lot.x1 === bx1) faces.push({ axis: 0, plane: lot.x1, nrm:  1, a: lot.z0, b: lot.z1 });
+  if (lot.z0 === bz0) faces.push({ axis: 1, plane: lot.z0, nrm: -1, a: lot.x0, b: lot.x1 });
+  if (lot.z1 === bz1) faces.push({ axis: 1, plane: lot.z1, nrm:  1, a: lot.x0, b: lot.x1 });
+  if (!faces.length) return;
+  const f = faces[Math.floor(hash3(lot.seed, 71, WSEED) * faces.length) % faces.length];
+  const span = f.b - f.a;
+  if (span < 5) return;
+  const u = f.a + span * 0.5;
+  const d = { axis: f.axis, plane: f.plane, nrm: f.nrm, u, w: 1.8, h: 2.5, lotH: lot.h };
+  if (f.axis === 0){
+    d.ox = f.plane + f.nrm * 1.2; d.oz = u;
+    d.rx = f.plane - f.nrm * 3.2; d.rz = u;
+  } else {
+    d.oz = f.plane + f.nrm * 1.2; d.ox = u;
+    d.rz = f.plane - f.nrm * 3.2; d.rx = u;
+  }
+  B.doors.push(d);
 }
 
 /** outdoor/telão numa fachada que dá para a rua. */
@@ -639,7 +671,9 @@ function getBlock(i, j){
   B = makeBlock(i, j);
   blockCache.set(key, B);
   blockOrder.push(key);
-  if (blockOrder.length > 220){                  // descarta os mais antigos
+  // o cache acompanha o alcance de visão: ver mais longe é tocar mais bloco
+  const teto = TUNE.dist > 200 ? 620 : (TUNE.dist > 140 ? 380 : 220);
+  if (blockOrder.length > teto){
     for (let k = 0; k < 40; k++) blockCache.delete(blockOrder.shift());
   }
   return B;
@@ -1025,6 +1059,7 @@ if (!ctx) fail("Não foi possível abrir o canvas 2D.");
 
 let COLS = 0, ROWS = 0, SW = 0, SH = 0;
 let cellChar = null, cellCol = null, cellDep = null, cellId = null;
+let cellPin = null;               // glifos que o contorno não pode sobrescrever
 let imgData = null, imgU32 = null;
 const BG = 0xff05070a;            // ABGR
 const lut = new Uint32Array(4);
@@ -1055,7 +1090,8 @@ function blit(){
 /* ------------------------------------------------------------------ */
 
 const cam = { x: 0, z: 0, yaw: 0, pitch: 0, eye: CFG.EYE };
-const TUNE = { exposure: 6.2, gamma: 0.82, black: 0.014, fov: 74 * Math.PI / 180 };
+const TUNE = { exposure: 6.2, gamma: 0.82, black: 0.014, fov: 74 * Math.PI / 180,
+               dist: CFG.FOG };   // alcance de visão, ajustável no menu
 let colorMode = true;
 let TIME = 0;
 
@@ -1065,6 +1101,11 @@ let zbuf = null, rdxs = null, rdzs = null;
 
 /* pilha de paredes de uma coluna (evita alocar por frame) */
 const MAXHIT = 24;
+/* a marcha registra TODOS os tiles atravessados, não só as paredes: é
+   isso que permite desenhar as lajes como superfície com altura própria */
+const MAXSTEP = 900;
+const stepD = new Float64Array(MAXSTEP);
+const stepH = new Float64Array(MAXSTEP);
 const hDist = new Float64Array(MAXHIT);
 const hHigh = new Float64Array(MAXHIT);
 const hSide = new Uint8Array(MAXHIT);
@@ -1186,6 +1227,16 @@ function groundColor(wx, wz, out){
   out[0] = a; out[1] = a * 0.99; out[2] = a * 0.95;
 }
 const gcol = [0, 0, 0];
+
+/** laje de cobertura: piso de brita com juntas, visto de cima do prédio */
+function roofColor(wx, wz, h, out){
+  const tx = Math.floor(wx), tz = Math.floor(wz);
+  const n = hash3(tx, tz, 17);
+  const jx = Math.abs((wx * 0.25) % 1 - 0.5), jz = Math.abs((wz * 0.25) % 1 - 0.5);
+  const junta = (jx > 0.46 || jz > 0.46) ? 0.55 : 1.0;
+  const a = (0.145 + 0.055 * n) * junta;
+  out[0] = a; out[1] = a * 1.02; out[2] = a * 1.10;
+}
 
 /* ---- fachada ------------------------------------------------------ */
 function facade(u, wy, lot, out){
@@ -1382,6 +1433,7 @@ function renderWorld(){
   cellChar.fill(0);
   cellDep.fill(1e9);
   cellId.fill(0);
+  cellPin.fill(0);
 
   for (let cx = 0; cx < COLS; cx++){
     const camX = ((cx + 0.5) / COLS) * 2 - 1;
@@ -1398,11 +1450,14 @@ function renderWorld(){
     if (rdz < 0){ stepZ = -1; sdz = (pz - mapZ) * ddz; } else { stepZ = 1; sdz = (mapZ + 1 - pz) * ddz; }
 
     let nHit = 0, prevH = heightAtTile(mapX, mapZ), dist = 0, side = 0;
-    while (dist < CFG.FOG && nHit < MAXHIT){
+    let nStep = 0;
+    stepD[0] = 0; stepH[0] = prevH;
+    while (dist < TUNE.dist && nStep < MAXSTEP - 1){
       if (sdx < sdz){ dist = sdx; sdx += ddx; mapX += stepX; side = 0; }
       else          { dist = sdz; sdz += ddz; mapZ += stepZ; side = 1; }
       const h = heightAtTile(mapX, mapZ);
-      if (h > prevH){
+      nStep++; stepD[nStep] = dist; stepH[nStep] = h;
+      if (h > prevH && nHit < MAXHIT){
         hDist[nHit] = dist; hHigh[nHit] = h; hSide[nHit] = side;
         hMapX[nHit] = mapX; hMapZ[nHit] = mapZ;
         nHit++;
@@ -1413,36 +1468,50 @@ function renderWorld(){
     }
     zbuf[cx] = nHit ? hDist[0] : 1e9;
 
-    /* --- piso: começa embaixo da parede mais próxima quando ela já
-           cobre o horizonte, senão vem desde o horizonte --- */
-    let floorFrom = Math.max(0, Math.ceil(horizon));
-    if (nHit > 0){
-      const d0 = hDist[0];
-      const ny0 = Math.floor(horizon - (hHigh[0] - eye) * projV / d0);
-      const ny1 = Math.ceil(horizon + eye * projV / d0);
-      if (ny0 <= floorFrom) floorFrom = Math.max(floorFrom, ny1);
-    }
-    for (let y = floorFrom; y < ROWS; y++){
-      const denom = y + 0.5 - horizon;
-      if (denom <= 0.001) continue;
-      const d = eye * projV / denom;
-      const idx = y * COLS + cx;
-      if (d > CFG.FOG){ cellChar[idx] = 0; continue; }
-      const wx = px + rdx * d, wz = pz + rdz * d;
-      groundColor(wx, wz, gcol);
-      shade(wx, 0.02, wz, 0, 1, 0);
-      if (ENV.wet > 0.01){                       // molhado: escuro e espelhado
-        const dry = 1 - 0.45 * ENV.wet, shine = 1 + 1.6 * ENV.wet;
-        gcol[0] *= dry; gcol[1] *= dry; gcol[2] *= dry;
-        sR *= shine; sG *= shine; sB *= shine * 1.06;
+    /* --- superfícies: chão e lajes ---------------------------------
+       Percorre os tiles do mais perto ao mais longe. O topo de cada tile
+       é uma superfície na altura dele, e ocupa da distância em que a
+       marcha entrou no tile até a distância em que saiu. Como andar para
+       longe sobe na tela, basta uma marca-d'água de "última linha já
+       preenchida" para resolver a oclusão. Quando um tile é mais alto que
+       o olho ele é parede: dali para trás nada mais aparece.
+       (Antes isto era um floor casting contra o plano y=0, que não tinha
+        como acertar a laje sob os próprios pés lá em cima.)            */
+    let yFill = ROWS - 1;
+    for (let k = 0; k <= nStep && yFill >= 0; k++){
+      const h = stepH[k];
+      if (h >= eye) break;
+      const dNear = k === 0 ? 0.02 : stepD[k];
+      const dFar  = k < nStep ? stepD[k + 1] : TUNE.dist;
+      if (dFar <= dNear) continue;
+      const alt = eye - h;
+      const yFar = Math.max(0, Math.ceil(horizon + alt * projV / dFar));
+      let yNear = Math.min(yFill, Math.floor(horizon + alt * projV / dNear));
+      if (yNear >= ROWS) yNear = ROWS - 1;
+      for (let y = yNear; y >= yFar; y--){
+        const denom = y + 0.5 - horizon;
+        if (denom <= 0.001) continue;
+        const d = alt * projV / denom;
+        const idx = y * COLS + cx;
+        if (d > TUNE.dist){ cellChar[idx] = 0; continue; }
+        const wx = px + rdx * d, wz = pz + rdz * d;
+        if (h > 0) roofColor(wx, wz, h, gcol);
+        else       groundColor(wx, wz, gcol);
+        shade(wx, h + 0.02, wz, 0, 1, 0);
+        if (ENV.wet > 0.01){                     // molhado: escuro e espelhado
+          const dry = 1 - 0.45 * ENV.wet, shine = 1 + 1.6 * ENV.wet;
+          gcol[0] *= dry; gcol[1] *= dry; gcol[2] *= dry;
+          sR *= shine; sG *= shine; sB *= shine * 1.06;
+        }
+        cellDep[idx] = d;
+        cellId[idx] = 1;
+        const fg = 1 - Math.exp(-(d / TUNE.dist) * (d / TUNE.dist) * 2.4);
+        emit(idx,
+          (gcol[0] * sR) * (1 - fg) + fogR * fg,
+          (gcol[1] * sG) * (1 - fg) + fogG * fg,
+          (gcol[2] * sB) * (1 - fg) + fogB * fg);
       }
-      cellDep[idx] = d;
-      cellId[idx] = 1;
-      const fg = 1 - Math.exp(-(d / CFG.FOG) * (d / CFG.FOG) * 2.4);
-      emit(idx,
-        (gcol[0] * sR) * (1 - fg) + fogR * fg,
-        (gcol[1] * sG) * (1 - fg) + fogG * fg,
-        (gcol[2] * sB) * (1 - fg) + fogB * fg);
+      if (yFar - 1 < yFill) yFill = yFar - 1;
     }
 
     /* --- paredes, do fundo para a frente --- */
@@ -1469,6 +1538,19 @@ function renderWorld(){
       const wx = hSide[n] === 0 ? planeC : wallU;
       const wz = hSide[n] === 0 ? wallU : planeC;
 
+      /* porta de acesso à cobertura nesta coluna? */
+      let door = null;
+      if (B){
+        const nrmC = hSide[n] === 0 ? nx : nz;
+        for (let k = 0; k < B.doors.length; k++){
+          const q = B.doors[k];
+          if (q.axis !== hSide[n] || q.nrm !== nrmC) continue;
+          if (Math.abs(q.plane - planeC) > 0.01) continue;
+          if (wallU < q.u - q.w * 0.5 || wallU > q.u + q.w * 0.5) continue;
+          door = q; break;
+        }
+      }
+
       /* outdoor que cobre esta coluna? */
       let bb = null;
       if (B){
@@ -1482,13 +1564,30 @@ function renderWorld(){
         }
       }
 
-      const fog = 1 - Math.exp(-(d / CFG.FOG) * (d / CFG.FOG) * 2.4);
+      const fog = 1 - Math.exp(-(d / TUNE.dist) * (d / TUNE.dist) * 2.4);
       for (let y = y0; y < y1; y++){
         const wy = eye + (horizon - y - 0.5) * d / projV;
         if (wy < 0) continue;
         const idx = y * COLS + cx;
         cellDep[idx] = d;
         cellId[idx] = faceId;
+
+        if (door && wy <= door.h){
+          const lu = (wallU - (door.u - door.w * 0.5)) / door.w;
+          const lv = wy / door.h;
+          if (lu < 0.13 || lu > 0.87 || lv > 0.90){          // batente aceso
+            const k2 = 1.5 + 0.45 * Math.sin(TIME * 2 + door.u);
+            emit(idx, 1.00 * k2 * (1 - fog) + fogR * fog,
+                      0.74 * k2 * (1 - fog) + fogG * fog,
+                      0.34 * k2 * (1 - fog) + fogB * fog);
+          } else {                                           // luz do saguão
+            const g2 = 0.42 * (1 - lv * 0.7);
+            emit(idx, 0.95 * g2 * (1 - fog) + fogR * fog,
+                      0.80 * g2 * (1 - fog) + fogG * fog,
+                      0.55 * g2 * (1 - fog) + fogB * fog);
+          }
+          continue;
+        }
 
         if (bb && wy >= bb.y0 && wy <= bb.y1){
           const gph = billboardCell(bb, wallU, wy, bcol);
@@ -1536,6 +1635,7 @@ function edgePass(){
       const i = y * COLS + x;
       const id = cellId[i];
       if (id < 2) continue;                // céu e piso não recebem contorno
+      if (cellPin[i]) continue;            // marcador de porta / baliza: glifo preservado
       const d = cellDep[i];
       // vizinho de outra superfície E mais longe = silhueta deste lado
       const lF = x > 0        && cellId[i - 1]    !== id && cellDep[i - 1]    > d;
@@ -1567,7 +1667,7 @@ function edgePass(){
 function spriteProject(wx, wz){
   const dx = wx - cam.x, dz = wz - cam.z;
   const t = dx * dirX + dz * dirZ;
-  if (t < 0.4 || t > CFG.FOG) return null;
+  if (t < 0.4 || t > TUNE.dist) return null;
   const s = dx * rgtX + dz * rgtZ;
   return { t, col: COLS / 2 + (s / t / tanH) * (COLS / 2) };
 }
@@ -1580,7 +1680,7 @@ function drawLamp(L){
   if (!p) return;
   const sid = nextSpriteId();
   const t = p.t;
-  const fog = 1 - Math.exp(-(t / CFG.FOG) * (t / CFG.FOG) * 2.4);
+  const fog = 1 - Math.exp(-(t / TUNE.dist) * (t / TUNE.dist) * 2.4);
   const yBase = horizon + cam.eye * projV / t;
   const yTop  = horizon - (L.h - cam.eye) * projV / t;
   const halfPole = Math.max(0.5, (0.085 / t / tanH) * (COLS / 2));
@@ -1619,7 +1719,7 @@ function drawTree(T){
   const t = p.t;
   if (t < 0.9) return;
   const sid = nextSpriteId();
-  const fog = 1 - Math.exp(-(t / CFG.FOG) * (t / CFG.FOG) * 2.4);
+  const fog = 1 - Math.exp(-(t / TUNE.dist) * (t / TUNE.dist) * 2.4);
   const yBase = horizon + cam.eye * projV / t;
 
   /* tronco */
@@ -1786,7 +1886,7 @@ function drawArtSprite(wx, wz, yBase, ww, wh, art, r, g, b, flip){
   const rows = yBot - yTop;
   if (rows < 0.6) return;
 
-  const fog = 1 - Math.exp(-(t / CFG.FOG) * (t / CFG.FOG) * 2.4);
+  const fog = 1 - Math.exp(-(t / TUNE.dist) * (t / TUNE.dist) * 2.4);
   const k = (1 - fog);
   const sid = nextSpriteId();
   const c0 = Math.max(0, Math.floor(p.col - half)), c1 = Math.min(COLS - 1, Math.ceil(p.col + half));
@@ -1966,6 +2066,71 @@ function hitsCar(x, z, r){
   return false;
 }
 
+/** um único glifo posto num ponto do mundo (marcadores de porta) */
+function drawGlyphMark(x, y, z, ch, r, g, b){
+  const p = spriteProject(x, z);
+  if (!p) return;
+  const cx = Math.round(p.col);
+  if (cx < 0 || cx >= COLS || p.t >= zbuf[cx]) return;
+  const row = Math.round(horizon - (y - cam.eye) * projV / p.t);
+  if (row < 0 || row >= ROWS) return;
+  const i = row * COLS + cx;
+  cellDep[i] = p.t; cellId[i] = nextSpriteId();
+  emitChar(i, ci(ch), r, g, b);
+  cellPin[i] = 1;                      // um glifo só: o contorno o apagaria
+}
+
+/* ---- portas: marcador, alcance e teleporte ------------------------- */
+let portaPerto = null;                 // { d, subir } ou null
+
+function acharPorta(){
+  const bi = idxX(cam.x), bj = idxZ(cam.z);
+  let melhor = null, md = 3.4 * 3.4;
+  for (let dj = -1; dj <= 1; dj++){
+    for (let di = -1; di <= 1; di++){
+      const B = getBlock(bi + di, bj + dj);
+      for (let k = 0; k < B.doors.length; k++){
+        const d = B.doors[k];
+        const naLaje = Math.abs(player.y - d.lotH) < 2.5;
+        if (!naLaje && player.y > 2.5) continue;      // nem no chão nem na laje
+        const x = naLaje ? d.rx : d.ox, z = naLaje ? d.rz : d.oz;
+        const dx = x - cam.x, dz = z - cam.z;
+        const q = dx * dx + dz * dz;
+        if (q < md){ md = q; melhor = { d, subir: !naLaje }; }
+      }
+    }
+  }
+  return melhor;
+}
+function usarPorta(){
+  if (!portaPerto) return;
+  const d = portaPerto.d;
+  if (portaPerto.subir){ cam.x = d.rx; cam.z = d.rz; player.y = d.lotH; }
+  else { cam.x = d.ox; cam.z = d.oz; player.y = topUnder(d.ox, d.oz, 0.34); }
+  player.vx = player.vz = player.vy = 0;
+  player.onGround = true;
+  cam.eye = player.y + CFG.EYE;
+  lgKey = ""; memoReset();
+}
+/** exclamação em cima de cada porta e de cada saída de laje por perto */
+function drawDoorMarks(){
+  const bi = idxX(cam.x), bj = idxZ(cam.z);
+  const bob = Math.sin(TIME * 2.4) * 0.18;
+  for (let dj = -2; dj <= 2; dj++){
+    for (let di = -2; di <= 2; di++){
+      const B = getBlock(bi + di, bj + dj);
+      for (let k = 0; k < B.doors.length; k++){
+        const d = B.doors[k];
+        const perto = portaPerto && portaPerto.d === d;
+        const b2 = perto ? 3.4 : 1.5;
+        drawGlyphMark(d.ox, 3.1 + bob, d.oz, "!", 1.0 * b2, 0.78 * b2, 0.25 * b2);
+        if (Math.abs(player.y - d.lotH) < 3.5)        // só quando se está lá em cima
+          drawGlyphMark(d.rx, d.lotH + 1.2 + bob, d.rz, "!", 1.0 * b2, 0.78 * b2, 0.25 * b2);
+      }
+    }
+  }
+}
+
 /** baliza no alto da torre: pisca em vermelho, visível de longe */
 function drawBeacon(bc){
   const p = spriteProject(bc.x, bc.z);
@@ -1979,6 +2144,7 @@ function drawBeacon(bc){
   cellDep[i] = t; cellId[i] = nextSpriteId();
   const k = on ? 3.4 : 0.25;
   emit(i, 1.0 * k, 0.22 * k, 0.18 * k);
+  cellPin[i] = 1;
 }
 
 function renderSprites(){
@@ -1995,6 +2161,7 @@ function renderSprites(){
   }
   drawCars();
   drawPeds();
+  drawDoorMarks();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2151,6 +2318,7 @@ function update(dt){
   rebuildLights(cam.x, cam.z);
   updateSignLights();
   updateDrops(dt);
+  portaPerto = acharPorta();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2207,7 +2375,8 @@ window.addEventListener("keydown", (e) => {
     case "Escape": if (locked) document.exitPointerLock?.(); break;
     case "KeyC": colorMode = !colorMode; break;
     case "KeyL": lightsOn = !lightsOn; break;
-    case "KeyE": edgesOn = !edgesOn; break;
+    case "KeyE": usarPorta(); break;
+    case "KeyO": edgesOn = !edgesOn; break;
     case "KeyM": showMinimap = !showMinimap; break;
     case "KeyR": respawn(); break;
     case "KeyK": toggleSkate(); break;
@@ -2269,6 +2438,7 @@ function resize(){
   cellCol  = new Uint32Array(COLS * ROWS);
   cellDep  = new Float32Array(COLS * ROWS);
   cellId   = new Uint16Array(COLS * ROWS);
+  cellPin  = new Uint8Array(COLS * ROWS);
   zbuf = new Float64Array(COLS);
   rdxs = new Float64Array(COLS);
   rdzs = new Float64Array(COLS);
@@ -2465,6 +2635,10 @@ function drawMenu(){
                        (TUNE.fov * 180 / Math.PI).toFixed(0) + " g");
     TUNE.fov = clamp(g, 1, 120) * Math.PI / 180;    // 0 grau seria zoom infinito
   });
+  items.push(y => {
+    TUNE.dist = Math.round(uiSlider(cx0, y, cw, "alcance de visao", TUNE.dist, 60, 420,
+                                    TUNE.dist.toFixed(0) + " m"));
+  });
   items.push(nop);
 
   items.push(y => uiRule(cx0 - 1, y, cw + 2, "MUNDO"));
@@ -2484,7 +2658,7 @@ function drawMenu(){
     items.push(nop);
     items.push(y => uiRule(cx0 - 1, y, cw + 2, "CONTROLES"));
     items.push(y => uiText(cx0, y, "WASD andar  MOUSE olhar  SHIFT correr  ESPACO pular", UI.dim));
-    items.push(y => uiText(cx0, y, "K pega o skate (pula tambem)", UI.dim));
+    items.push(y => uiText(cx0, y, "K pega o skate  E entra na porta  O contornos", UI.dim));
     items.push(y => uiText(cx0, y, "ESC abre este menu   -   clique fora dele para voltar", UI.dim));
   }
   items.push(nop);
@@ -2519,6 +2693,10 @@ function drawStats(){
 }
 
 function drawUI(){
+  if (locked && portaPerto){
+    const txt = portaPerto.subir ? "[ E ]  SUBIR AO TOPO" : "[ E ]  DESCER";
+    uiCenter(0, ROWS - 4, COLS, txt, UI.hi);
+  }
   if (locked){ if (showStats) drawStats(); }
   else drawMenu();
   if (showMinimap){                                  // fica sempre na tela

@@ -42,14 +42,29 @@ atalhos continuam valendo como caminho rápido:
 | `K` | pegar / largar o skate |
 | `ESC` | abre o menu |
 | `C` | cor ↔ mono |
-| `L` | luz dinâmica · `E` contornos · `M` minimapa |
+| `E` | entrar na porta / descer do telhado |
+| `L` | luz dinâmica · `O` contornos · `M` minimapa |
 | `[` `]` | tamanho do caractere (6×10 até 14×25 px) |
 | `1` `2` `3` `4` | conjunto de caracteres |
 | `G` | outro mundo · `R` respawn · `F` tela cheia |
 | `,` `.` | exposição · `;` `'` nível de preto |
 
-O menu também traz uma barra de **campo de visão de 0 a 120 graus**. O valor
-efetivo é limitado a 1 grau no mínimo: em 0 a projeção seria um zoom infinito.
+O menu também traz duas barras contínuas:
+
+- **campo de visão, de 0 a 120 graus.** O valor efetivo é limitado a 1 grau no
+  mínimo: em 0 a projeção seria um zoom infinito.
+- **alcance de visão, de 60 a 420 m.** É a distância em que a marcha de cada
+  raio para, e também a escala da névoa — aumentar mostra a cidade de longe, com
+  os arranha-céus do fundo aparecendo inteiros. Como cada quarteirão só é gerado
+  quando um raio o alcança, o teto do cache acompanha a barra (220 quarteirões
+  até 140 m, 380 até 200 m, 620 acima disso), senão a cidade distante seria
+  regerada a cada quadro.
+
+Puxar o alcance de 60 para 420 m quase não custa quadro — medido girando 360°
+na rua: 5,1 ms a 140 m, 4,6 ms a 220 m, 4,7 ms a 420 m. É a própria cidade que
+paga a conta: no nível da calçada quase todo raio bate num prédio antes dos
+50 m, então a marcha para no mesmo lugar. A diferença aparece de cima de um
+telhado, onde os raios de fato viajam.
 
 Os widgets são de modo imediato: cada um se desenha e, no mesmo passo, testa se
 o mouse está em cima e se houve clique. Trocar o tamanho da célula realoca os
@@ -76,7 +91,8 @@ sem GPU nenhuma) contra ~55 ms da versão anterior.
    │   → registra cada face de parede exposta (h > h anterior)│
    │   → para quando uma parede já cobre o topo da tela       │
    ├──────────────────────────────────────────────────────────┤
-   │ piso: floor casting (distância = eye·projV / (y-horiz))  │
+   │ chão e telhados: marcha de superfície sobre os mesmos  │
+   │   passos do DDA, do perto para o longe, com marca d'água│
    │ paredes: algoritmo do pintor, do fundo para a frente     │
    │ céu: gradiente + estrelas fixas em coordenada de mundo   │
    ├──────────────────────────────────────────────────────────┤
@@ -97,6 +113,22 @@ sempre que a altura sobe em relação ao tile anterior — o que também expõe 
 prédio alto que está atrás do baixo. As faces são desenhadas do fundo para a
 frente, então a oclusão sai de graça. A marcha para assim que uma parede cobre
 o topo da tela: nada atrás dela pode aparecer.
+
+**Chão e telhados na mesma marcha.** Um raycaster de modo texto normalmente
+desenha o piso por *floor casting*: para cada linha abaixo do horizonte, a
+distância sai de `eye·projV / (y − horizonte)`. A conta pressupõe **um único
+plano em y = 0** — e por isso o teto de um prédio simplesmente não existe. Aqui
+o DDA guarda cada passo que deu (distância e altura do tile), e o chão é
+desenhado percorrendo esses passos **do perto para o longe**: cada tile pinta a
+faixa da sua própria laje, com a linha `y` resolvida contra a altura *daquele*
+tile, e uma marca d'água guarda até onde a coluna já foi preenchida para o
+próximo trecho não repintar o que ficou na frente. A marcha para quando um tile
+é mais alto que o olho — dali para frente é parede, não superfície.
+
+É a mesma travessia que já existia, lida duas vezes, então o custo por coluna
+praticamente não muda. E é isso que torna o telhado um lugar de verdade: subir
+num prédio de 76 m e olhar para baixo devolve 1,2 m de distância na base da
+tela, não os 56 m que a fórmula do plano único devolvia.
 
 **Contornos geométricos, não Sobel.** A v1 procurava bordas na imagem. Aqui não
 há imagem — há o z-buffer da própria grade de caracteres, mais um id de
@@ -315,6 +347,39 @@ propósito: molha a cena sem sujar a leitura do texto. O asfalto molhado escurec
 e reflete mais, o que acende as poças sob os postes, e a tempestade tem
 relâmpago que clareia o céu e a chuva por um instante.
 
+## Subir nos prédios
+
+![porta](docs/porta.png)
+
+Todo prédio a partir de **24 m** ganha uma **porta** no meio de uma das
+fachadas que dão para a rua — a mesma escolha de face que os outdoors usam, então
+a porta nunca cai virada para o vizinho geminado. Ela é desenhada na própria
+passagem da parede: moldura acesa nas bordas, saguão em degradê no miolo, e um
+ponto de luz âmbar de 7 m de raio no batente, que à noite marca a entrada de
+longe.
+
+Uma **exclamação** flutua acima de cada porta, subindo e descendo devagar, e
+dobra de brilho quando você entra no alcance de 3,4 m. Aí aparece o aviso
+`[ E ] SUBIR AO TOPO` no rodapé — o único momento em que algo escrito aparece
+na tela fora do menu.
+
+![topo](docs/topo.png)
+
+`E` teleporta para a laje, 3,2 m para dentro da fachada, e o telhado é chão como
+qualquer outro: dá para andar nele, correr, andar de skate e pular. De cima, com
+a barra de alcance aberta, a cidade vira um mar de lajes até a névoa. Para
+voltar há dois caminhos:
+
+- **pular** — a queda é a física normal do jogo, e a colisão por altura vai
+  parando em cada laje que estiver no caminho;
+- **a mesma porta** — no ponto de saída da laje há uma segunda exclamação, e o
+  `E` de lá devolve exatamente para a calçada de onde se entrou.
+
+O marcador é um glifo só, e um glifo só era exatamente o que o passe de
+contornos apagava: uma célula isolada mais perto que as quatro vizinhas tem
+descontinuidade nos quatro lados, e virava `\`. As células de marcador e de
+baliza agora são fixadas num mapa de bits que o contorno pula.
+
 ## O skate
 
 ![skate](docs/skate.png)
@@ -344,8 +409,7 @@ conjuntos de caracteres e seis tamanhos de célula trocam em tempo real:
 
 ## Próximos passos
 
-- interiores e elevadores
-- carros e pedestres (sprites já têm z-test)
+- interiores de verdade (hoje a porta teleporta)
 - manobras no skate (hoje só rola e freia)
 - áudio e controles de toque
 - ruas em diagonal / avenidas (hoje a malha é estritamente ortogonal)
