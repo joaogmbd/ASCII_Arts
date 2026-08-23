@@ -79,7 +79,15 @@ ponto andou mais de 35 cm.
 O menu também traz duas barras contínuas:
 
 - **campo de visão, de 0 a 120 graus.** O valor efetivo é limitado a 1 grau no
-  mínimo: em 0 a projeção seria um zoom infinito.
+  mínimo: em 0 a projeção seria um zoom infinito. E o campo **vertical** tem
+  teto de 70°: num pinhole ele vem junto com o horizontal, e a 120° isso dava
+  90° na vertical — metade da tela virava chão, e o pouco de mundo que sobrava
+  na metade de baixo ficava esticado sobre metade das linhas. Andando e olhando
+  para baixo era isso que virava borrão. Acima do teto, o que a barra abre vai
+  só para os lados — é o "Hor+" dos jogos. Medindo o gradiente de graus por
+  linha entre o topo e a base da tela, olhando 49° para baixo: a 74° de campo dá
+  2,3×, a 120° dava **5,3×** e hoje dá **3,5×**. O preço é um esmagamento
+  anamórfico leve, que numa grade de caracteres não se vê.
 - **alcance de visão, de 60 a 420 m.** É a distância em que a marcha de cada
   raio para, e também a escala da névoa — aumentar mostra a cidade de longe, com
   os arranha-céus do fundo aparecendo inteiros. Como cada quarteirão só é gerado
@@ -469,6 +477,38 @@ contornos apagava: uma célula isolada mais perto que as quatro vizinhas tem
 descontinuidade nos quatro lados, e virava `\`. As células de marcador e de
 baliza agora são fixadas num mapa de bits que o contorno pula.
 
+## Som
+
+Seis peças, em `assets/sounds/`, e **nenhuma liga ou desliga**: cada camada tem
+um alvo de volume recalculado a cada quadro a partir da própria fonte, e
+persegue esse alvo com uma constante de tempo — sem isso toda mudança de estado
+viraria um estalo.
+
+| som | quando | o volume vem de |
+|---|---|---|
+| carro passando | um carro entra em 20 m | `(1 − d/20)²`, seguindo o carro enquanto toca |
+| gente conversando | o dia todo, mais forte quando a cidade enche | densidade do horário × quanta gente há a menos de 34 m |
+| chuva com trovão ao longe | chovendo | `ENV.fall`, mais forte na tempestade |
+| trovão e rodovia | chovendo | idem — as duas peças se revezam, uma por trecho de clima |
+| ambiente natural | amanhecer | sino em volta do nascer do sol, abafado se estiver chovendo |
+| vento | em cima de um prédio | altura do jogador, de 9 m a 39 m |
+
+Medido: o carro sai de 0 a 20 m, passa por 0,07 → 0,27 → 0,54 e chega a 0,68 ao
+lado do jogador, caindo simétrico depois. A conversa vai de 0,05 de madrugada a
+0,32 de manhã, 1,00 à tarde e 0,60 à noite — a mesma curva da densidade de
+pedestres. E o vento é zero na calçada.
+
+O menu tem uma seção **SOM** com liga/desliga e barra de volume.
+
+**Nada de Web Audio, de propósito.** O jogo é um arquivo só, que se abre com
+duplo clique — e abrir do disco faz o navegador tratar o mp3 como origem opaca,
+o que faz um `MediaElementSource` ligado a ele tocar em silêncio. Com `<audio>`
+puro e `.volume` o som funciona servido por HTTP e pelo disco, e volume é
+justamente o que precisa ser dinâmico. O que se perde é o *pan* estéreo do
+carro; a rampa de volume faz quase todo o trabalho sozinha. O navegador também
+só libera áudio depois de um gesto, então o clique que entra na cidade destrava
+as peças com um play mudo.
+
 ## O skate
 
 ![skate](docs/skate.png)
@@ -499,6 +539,7 @@ conjuntos de caracteres e seis tamanhos de célula trocam em tempo real:
 ## Próximos passos
 
 - interiores de verdade (hoje a porta teleporta)
+- pan estéreo dos sons, que pede servir por HTTP em vez de abrir do disco
 - manobras no skate (hoje só rola e freia)
 - áudio e controles de toque
 - ruas em diagonal / avenidas (hoje a malha é estritamente ortogonal)
@@ -517,6 +558,10 @@ histórico do git, em `178d2b8`.
   de quem a fez (lmg, anubis, mark, sk, ejm, jgs)
 - Carros: <https://ascii.co.uk/art/car> (ind, Lester, PS) — a assinatura foi
   recortada do sprite porque ficaria flutuando ao lado do veículo em movimento
+- Sons: peças de `freesound.org`, nos nomes de arquivo em `assets/sounds/` —
+  tanweraman (carro), perymarques (conversa), solarmusic (chuva com trovão),
+  alex_jauk (trovão e rodovia), freesound_community (ambiente natural) e
+  soundreality (vento)
 - Pedestres: bonecos em traço feitos aqui. As peças pedidas em
   `asciiart.website` não puderam ser baixadas — o site responde 403 atrás de um
   CAPTCHA. A tabela `PED_ART` no começo da seção de gente e trânsito é só uma
