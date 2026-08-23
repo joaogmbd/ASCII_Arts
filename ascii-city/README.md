@@ -22,6 +22,7 @@ cd ascii-city && python3 -m http.server 8000   # http://localhost:8000
 | `W` `A` `S` `D` | andar |
 | mouse | olhar (clique para capturar o cursor, `ESC` solta) |
 | `SHIFT` | correr |
+| `K` | pegar / largar o skate |
 | `C` | cor ↔ mono | 
 | `L` | liga/desliga a iluminação dinâmica |
 | `E` | liga/desliga os contornos |
@@ -136,8 +137,49 @@ letreiro na fachada vizinha.
 
 Os **outdoors** desenham o texto com uma fonte matricial 5×7 em blocos, como um
 painel de LED: de perto dá para ler a mensagem passando, de longe vira um borrão
-colorido — igual na rua. Os **telões** rodam um equalizador animado. Ambos
-emitem luz proporcional à sua área.
+colorido — igual na rua. Os **telões** rodam um equalizador animado.
+
+#### A luz do painel é a densidade do que ele está mostrando
+
+Um painel não tem brilho fixo. A cada frame mede-se qual fração dele está de
+fato acesa, e é isso que vira intensidade e alcance da luz:
+
+- no **outdoor**, a tinta das letras que estão passando pela janela do painel —
+  a fonte 5×7 sabe quantas das 35 subcélulas cada letra acende, então uma
+  palavra gorda como `PACHINKO` clareia a calçada mais que o espaço entre
+  palavras;
+- no **telão**, a altura somada das barras do equalizador, que tem uma batida
+  global — a tela inteira acende e apaga junta, e a fachada pulsa no ritmo;
+- a moldura, sempre acesa, entra como um piso constante.
+
+Cada região é pesada pelo brilho que ela realmente emite (`EM_FRAME`,
+`EM_LETTER`, `EM_BAR`, `EM_OFF`), e as mesmas constantes desenham o painel e
+medem a luz, então os dois nunca saem de sincronia.
+
+Medido no protótipo: o *duty* de um telão oscila entre **0,17 e 0,44** e o de um
+outdoor entre **0,10 e 0,23**. Num ponto da calçada a 7 m do painel, a
+luminância vai de **0,48 a 0,81 (+69 %)** ao longo do ciclo, e a densidade média
+de caracteres de todo o piso visível sobe **5,6 %** — a rua responde em texto ao
+texto do letreiro.
+
+## O skate
+
+![skate](docs/skate.png)
+
+`K` pega e larga o skate. É **um pouco** mais rápido que correr — 13,6 m/s
+contra 11,0 m/s, cerca de 24 % — mas o que muda de verdade é a inércia:
+
+- demora a pegar velocidade e quase não perde sozinho: soltando o `W` você
+  desliza por bem mais tempo do que a pé;
+- `A` e `D` **fazem curva**, não caranguejo: empurram com 45 % da força, e a
+  velocidade gira junto com o olhar sem perder módulo — é o que separa carve de
+  patinar no gelo;
+- `S` é freio: para, não dá ré;
+- ao descer, o excesso de velocidade é cortado para a velocidade de corrida.
+
+O shape aparece em primeira pessoa e **recebe a luz da rua como qualquer outra
+superfície** — passa embaixo de um poste e acende junto. A remada levanta a
+câmera e o shape uma linha, no ritmo do empurrão.
 
 ## Ajustes
 
@@ -151,6 +193,7 @@ conjuntos de caracteres e seis tamanhos de célula trocam em tempo real:
 
 - interiores e elevadores
 - carros e pedestres (sprites já têm z-test)
+- manobras no skate (hoje só rola e freia)
 - áudio e controles de toque
 - ruas em diagonal / avenidas (hoje a malha é estritamente ortogonal)
 
