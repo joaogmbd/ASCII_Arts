@@ -146,6 +146,71 @@ const NEON = [
   [0.55, 0.45, 1.00], [0.35, 0.85, 1.00], [1.00, 0.42, 0.28],
   [0.65, 1.00, 0.35]
 ];
+/* ---- splash art dos painéis ----------------------------------------
+   Arte ASCII de ascii.co.uk/art, mantida com a assinatura de quem a fez
+   (lmg, jgs, sk, ejm, anubis, mark). Os telões da cidade rodam essas peças
+   como um painel de LED de baixa resolução: cada caractere da arte vira um
+   bloco de células na parede, e a luz que o painel joga na rua acompanha a
+   tinta da peça que está no ar.                                        */
+const SPLASH = [
+  { nome: "cat", w: 17, h: 8, ink: 0.272, l: [
+      "          #      ",
+      "          #      ",
+      "          #      ",
+      "^..^ #####       ",
+      "=TT=      ;      ",
+      " #########       ",
+      " # #   # #    lmg",
+      " M M   M M       " ] },
+  { nome: "cat", w: 21, h: 6, ink: 0.437, l: [
+      "                  _..",
+      " /}_{\\           /.-'",
+      "( a a )-.___...-'/   ",
+      "==._.==         ;    ",
+      "     \\ i _..._ /,    ",
+      "     {_;/   {_//  fsc" ] },
+  { nome: "skull", w: 18, h: 9, ink: 0.34, l: [
+      "  .-=-=-.         ",
+      " /       \\        ",
+      "|         |       ",
+      "| )     ( |       ",
+      "\\/ .\\ /. \\/       ",
+      "(    ^    )       ",
+      " |.     .|        ",
+      " ||xxxxx||        ",
+      " '-._._.-' -anubis" ] },
+  { nome: "skull", w: 14, h: 8, ink: 0.473, l: [
+      "        _  _  ",
+      "  ___ (~ )( ~)",
+      " /   \\_\\ \\/ / ",
+      "|   D_ ]\\ \\/  ",
+      "|   D _]/\\ \\  ",
+      " \\___/ / /\\ \\ ",
+      "      (_ )( _)",
+      "mark    ~  ~  " ] },
+  { nome: "ghost", w: 14, h: 8, ink: 0.33, l: [
+      "       .-.    ",
+      "      ( \" )   ",
+      "   /\\_.' '._/\\",
+      "   |         |",
+      "    \\       / ",
+      "     \\    /`  ",
+      "   (__)  /    ",
+      "jgs`.__.'     " ] },
+  { nome: "bird", w: 12, h: 6, ink: 0.528, l: [
+      "  .`.   _ _ ",
+      "__;_ \\ /,//`",
+      "--, `._) (  ",
+      " '//,,,  |  ",
+      "      )_/   ",
+      " sk  /_|    " ] },
+  { nome: "fish", w: 13, h: 4, ink: 0.5, l: [
+      "     ,      /",
+      "  . ~ ~ . ,/{",
+      ".'@ ))ejm'~.~",
+      "= - ~``      " ] },
+];
+
 const ADS = [
   "SUSHI 24H", "NEON BAR", "RAMEN", "CYBER CAFE", "OPEN", "KARAOKE",
   "NOODLES", "HOTEL", "PACHINKO", "TAXI", "DATA CLINIC", "VACANCY",
@@ -218,6 +283,20 @@ function splitLots(x0, z0, x1, z1, depth, seed, out){
   }
 }
 
+/** Porta de entrada única dos postes: recusa qualquer um que caia a menos
+ *  do vão mínimo de outro já colocado. Sem isso o ramal da rua sem saída
+ *  encostava postes nos da esquina. */
+function pushLamp(out, x, z, h, warm){
+  const min2 = CFG.LAMP_GAP_MIN * CFG.LAMP_GAP_MIN * 0.9;
+  for (let k = 0; k < out.length; k++){
+    const dx = out[k].x - x, dz = out[k].z - z;
+    if (dx * dx + dz * dz < min2) return false;
+  }
+  out.push({ x, z, h,
+             r: warm ? 1.00 : 0.55, g: warm ? 0.80 : 0.95, b: warm ? 0.48 : 1.00 });
+  return true;
+}
+
 /** postes ao longo de uma testada: vão constante dentro da testada e
  *  sorteado dentro de [GAP_MIN, GAP_MAX] — nunca colados, nunca ralos. */
 function lampsAlong(out, fixed, a0, a1, horizontal, seed, blk){
@@ -233,14 +312,93 @@ function lampsAlong(out, fixed, a0, a1, horizontal, seed, blk){
   for (let k = 0; k < n; k++){
     const t = a0 + (k + phase) * step;
     const h = CFG.LAMP_H_MIN + hash3(seed + k, 77, WSEED) * (CFG.LAMP_H_MAX - CFG.LAMP_H_MIN);
-    const warm = hash3(seed + k, 78, WSEED) < 0.72;
-    out.push({
-      x: horizontal ? t : fixed,
-      z: horizontal ? fixed : t,
-      h,
-      r: warm ? 1.00 : 0.55, g: warm ? 0.80 : 0.95, b: warm ? 0.48 : 1.00
-    });
+    pushLamp(out, horizontal ? t : fixed, horizontal ? fixed : t, h,
+             hash3(seed + k, 78, WSEED) < 0.72);
   }
+}
+
+/* ---- pintura de lote no grid de tiles do quarteirão ----------------- */
+/*  Todas as formas trabalham DENTRO do miolo edificável, então a caixa da
+    rua e a calçada continuam exatamente as mesmas em toda a cidade — é o
+    que permite variar o formato do quarteirão sem estragar o plano viário. */
+const MAT_CALCADA = 0, MAT_ASFALTO = 1, MAT_VERDE = 2;
+
+function newLot(B, seed, k, x0, z0, x1, z1, floors, rect){
+  const lot = {
+    x0, z0, x1, z1, rect: rect !== false,
+    h: Math.min(254, Math.round(clamp(floors, 1, CFG.FLOORS_MAX) * CFG.FLOOR_H)),
+    floors: Math.round(clamp(floors, 1, CFG.FLOORS_MAX)),
+    uid: (hash3(x0, z0, seed ^ 0x5AF) * 32000) | 0,
+    seed: (seed + k * 131) | 0,
+    tone: 0.72 + 0.5 * hash3(k, 21, seed)
+  };
+  B.lots.push(lot);
+  lot.id = B.lots.length;
+  return lot;
+}
+function tileSet(B, tx, tz, h, id, mat){
+  if (tx < B.x0 || tx >= B.x1 || tz < B.z0 || tz >= B.z1) return;
+  const i = (tz - B.z0) * B.w + (tx - B.x0);
+  if (h !== undefined){ B.height[i] = h; B.lotId[i] = id; }
+  if (mat !== undefined) B.mat[i] = mat;
+}
+function paintRect(B, lot){
+  for (let tz = lot.z0; tz < lot.z1; tz++)
+    for (let tx = lot.x0; tx < lot.x1; tx++) tileSet(B, tx, tz, lot.h, lot.id);
+}
+function paintDisc(B, cx, cz, r, h, id){
+  const r2 = r * r;
+  for (let tz = Math.floor(cz - r); tz <= Math.ceil(cz + r); tz++)
+    for (let tx = Math.floor(cx - r); tx <= Math.ceil(cx + r); tx++){
+      const dx = tx + 0.5 - cx, dz = tz + 0.5 - cz;
+      if (dx * dx + dz * dz <= r2) tileSet(B, tx, tz, h, id);
+    }
+}
+function paintMat(B, x0, z0, x1, z1, mat){
+  for (let tz = z0; tz < z1; tz++)
+    for (let tx = x0; tx < x1; tx++) tileSet(B, tx, tz, undefined, undefined, mat);
+}
+function paintDiscMat(B, cx, cz, r, mat){
+  const r2 = r * r;
+  for (let tz = Math.floor(cz - r); tz <= Math.ceil(cz + r); tz++)
+    for (let tx = Math.floor(cx - r); tx <= Math.ceil(cx + r); tx++){
+      const dx = tx + 0.5 - cx, dz = tz + 0.5 - cz;
+      if (dx * dx + dz * dz <= r2) tileSet(B, tx, tz, undefined, undefined, mat);
+    }
+}
+/** meia-fatia triangular: quem fica de um lado da diagonal recebe o lote */
+function paintTri(B, lot, diag){
+  const w = lot.x1 - lot.x0, d = lot.z1 - lot.z0;
+  for (let tz = lot.z0; tz < lot.z1; tz++){
+    for (let tx = lot.x0; tx < lot.x1; tx++){
+      const u = (tx + 0.5 - lot.x0) / w, v = (tz + 0.5 - lot.z0) / d;
+      const inside = diag === 0 ? (u + v < 1) : diag === 1 ? (u + v > 1)
+                   : diag === 2 ? (u < v) : (u > v);
+      if (inside) tileSet(B, tx, tz, lot.h, lot.id);
+    }
+  }
+}
+function scatterTrees(B, seed, x0, z0, x1, z1, n){
+  for (let k = 0; k < n; k++){
+    const tx = lerp(x0 + 1, x1 - 1, hash3(k, 11, seed));
+    const tz = lerp(z0 + 1, z1 - 1, hash3(k, 12, seed));
+    if (heightBlock(B, Math.floor(tx), Math.floor(tz)) > 0) continue;
+    B.trees.push({ x: tx, z: tz, h: 4.2 + hash3(k, 13, seed) * 3.0,
+                   seed: (seed + k * 977) & 0x7fff });
+  }
+}
+function heightBlock(B, tx, tz){
+  if (tx < B.x0 || tx >= B.x1 || tz < B.z0 || tz >= B.z1) return 0;
+  return B.height[(tz - B.z0) * B.w + (tx - B.x0)];
+}
+/** altura em andares para este quarteirão, a partir do distrito */
+function floorsFor(dist, seed, k){
+  const rh = hash3(k * 7 + 3, k * 13 + 5, seed);
+  const d2 = clamp((dist - 0.22) / 0.62, 0, 1);
+  let f = Math.round(lerp(CFG.FLOORS_MIN, CFG.FLOORS_MAX, Math.pow(d2, 1.5) * (0.35 + 0.65 * rh)));
+  if (hash3(k, 9, seed) < 0.07) f = Math.round(f * (1.9 + 1.5 * hash3(k, 10, seed)) + 6);
+  if (hash3(k, 5, seed) < 0.10) f = Math.max(1, Math.round(f * 0.22));
+  return clamp(f, 1, CFG.FLOORS_MAX);
 }
 
 const blockCache = new Map();
@@ -253,80 +411,153 @@ function makeBlock(i, j){
   const seed = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663) ^ WSEED) | 0;
 
   const B = {
-    i, j, x0, z0, x1, z1, w, d,
+    i, j, x0, z0, x1, z1, w, d, kind: "grid",
     height: new Uint8Array(w * d),
     lotId:  new Uint8Array(w * d),
-    lots: [], lamps: [], bbs: [], lights: [], trees: [],
+    mat:    new Uint8Array(w * d),
+    lots: [], lamps: [], bbs: [], lights: [], trees: [], beacons: [],
     park: false
   };
 
   /* miolo edificável = quarteirão menos a calçada */
   const bx0 = x0 + CFG.SIDEWALK_W, bx1 = x1 - CFG.SIDEWALK_W;
   const bz0 = z0 + CFG.SIDEWALK_W, bz1 = z1 - CFG.SIDEWALK_W;
-
+  const iw = bx1 - bx0, id_ = bz1 - bz0;
   const dist = district(i, j);
-  B.park = hash3(i, j, WSEED ^ 0xBEEF) < 0.09 || (bx1 - bx0 < 6 || bz1 - bz0 < 6);
 
-  if (!B.park){
+  /* --- que formato tem este quarteirão? --- */
+  const kr = hash3(i, j, WSEED ^ 0xBEEF);
+  let kind;
+  if (iw < 9 || id_ < 9)      kind = "praca";
+  else if (kr < 0.06)         kind = "praca";
+  else if (kr < 0.20)         kind = "patio";
+  else if (kr < 0.32)         kind = "torre";
+  else if (kr < 0.44)         kind = "cunha";
+  else if (kr < 0.56 && iw >= 22 && id_ >= 22) kind = "vila";
+  else                        kind = "grid";
+  B.kind = kind;
+  B.park = kind === "praca";
+
+  if (kind === "grid"){
     const rects = [];
     splitLots(bx0, bz0, bx1, bz1, 0, seed, rects);
-
     rects.forEach((r, k) => {
-      const [lx0, lz0, lx1, lz1] = r;
-      const rh = hash3(lx0 * 7 + k, lz0 * 13, seed);
-      // altura: distrito define o patamar, o lote varia em torno dele
-      const d2 = clamp((dist - 0.22) / 0.62, 0, 1);
-      const base = Math.pow(d2, 1.5);
-      let floors = Math.round(lerp(CFG.FLOORS_MIN, CFG.FLOORS_MAX, base * (0.35 + 0.65 * rh)));
-      if (hash3(k, 9, seed) < 0.07)                       // torre isolada
-        floors = Math.round(floors * (1.9 + 1.5 * hash3(k, 10, seed)) + 6);
-      if (hash3(k, 5, seed) < 0.10) floors = Math.max(1, Math.round(floors * 0.22)); // térreo comercial
-      floors = clamp(floors, 1, CFG.FLOORS_MAX);
-      const h = Math.min(254, Math.round(floors * CFG.FLOOR_H));
-
-      const lot = {
-        x0: lx0, z0: lz0, x1: lx1, z1: lz1, h, floors,
-        uid: (hash3(lx0, lz0, seed ^ 0x5AF) * 32000) | 0,
-        seed: (seed + k * 131) | 0,
-        tone: 0.72 + 0.5 * hash3(k, 21, seed)
-      };
-      B.lots.push(lot);
-
-      const id = B.lots.length;                       // 0 = vazio
-      for (let tz = lz0; tz < lz1; tz++){
-        const row = (tz - z0) * w;
-        for (let tx = lx0; tx < lx1; tx++){
-          B.height[row + (tx - x0)] = h;
-          B.lotId[row + (tx - x0)]  = id;
-        }
-      }
+      const lot = newLot(B, seed, k, r[0], r[1], r[2], r[3], floorsFor(dist, seed, k));
+      paintRect(B, lot);
       addBillboards(B, lot, bx0, bz0, bx1, bz1);
     });
+
+  } else if (kind === "patio"){
+    /* anel de prédios em volta de um pátio interno — muito comum em
+       quarteirão de cidade antiga, e dá um vazio verde no meio */
+    const th = 6 + Math.floor(hash3(i, j, seed) * 4);          // espessura do anel
+    const px0 = bx0 + th, pz0 = bz0 + th, px1 = bx1 - th, pz1 = bz1 - th;
+    if (px1 - px0 < 5 || pz1 - pz0 < 5){
+      const rects = [];
+      splitLots(bx0, bz0, bx1, bz1, 0, seed, rects);
+      rects.forEach((r, k) => {
+        const lot = newLot(B, seed, k, r[0], r[1], r[2], r[3], floorsFor(dist, seed, k));
+        paintRect(B, lot); addBillboards(B, lot, bx0, bz0, bx1, bz1);
+      });
+    } else {
+      const bands = [[bx0, bz0, bx1, pz0], [bx0, pz1, bx1, bz1],
+                     [bx0, pz0, px0, pz1], [px1, pz0, bx1, pz1]];
+      bands.forEach((r, k) => {
+        const lot = newLot(B, seed, k, r[0], r[1], r[2], r[3], floorsFor(dist, seed, k + 3));
+        paintRect(B, lot);
+        addBillboards(B, lot, bx0, bz0, bx1, bz1);
+      });
+      paintMat(B, px0, pz0, px1, pz1, MAT_VERDE);
+      scatterTrees(B, seed, px0, pz0, px1, pz1, 2 + Math.floor(hash3(i, j, seed ^ 3) * 4));
+    }
+
+  } else if (kind === "torre"){
+    /* torre cilíndrica escalonada no meio, praça em volta */
+    const cx = (bx0 + bx1) / 2, cz = (bz0 + bz1) / 2;
+    const R = Math.min(iw, id_) / 2 - 1;
+    paintMat(B, bx0, bz0, bx1, bz1, MAT_VERDE);
+    const base = floorsFor(dist, seed, 0);
+    const tiers = 2 + Math.floor(hash3(i, j, seed ^ 7) * 2);
+    for (let tI = 0; tI < tiers; tI++){
+      const f = base * (1.0 + tI * 0.55) + 4 * tI;
+      const lot = newLot(B, seed, tI, Math.floor(cx - R), Math.floor(cz - R),
+                         Math.ceil(cx + R), Math.ceil(cz + R), f, false);
+      paintDisc(B, cx, cz, R * (1 - tI * 0.26), lot.h, lot.id);
+    }
+    const top = B.lots[B.lots.length - 1];
+    B.beacons.push({ x: cx, z: cz, y: top.h + 1.2, seed: (seed ^ 0x1F) & 0x7fff });
+    scatterTrees(B, seed, bx0, bz0, bx1, bz1, 3 + Math.floor(hash3(i, j, seed ^ 5) * 4));
+
+  } else if (kind === "cunha"){
+    /* diagonal cortando o quarteirão: uma massa triangular alta e outra
+       baixa, o que dá silhuetas em rampa no skyline */
+    const diag = Math.floor(hash3(i, j, seed ^ 11) * 4);
+    const fa = floorsFor(dist, seed, 1), fb = Math.max(1, Math.round(floorsFor(dist, seed, 2) * 0.45));
+    const A = newLot(B, seed, 1, bx0, bz0, bx1, bz1, fa, false);
+    paintTri(B, A, diag);
+    const Bl = newLot(B, seed, 2, bx0, bz0, bx1, bz1, fb, false);
+    paintTri(B, Bl, diag ^ 1);
+    // as duas faces retas de cada cunha encostam na divisa: cabem letreiros
+    addBillboards(B, { ...A, rect: true }, bx0, bz0, bx1, bz1);
+
+  } else if (kind === "vila"){
+    /* rua sem saída: um ramal entra do meio de uma testada e termina num
+       balão de retorno; as casas se voltam para ele */
+    const side = Math.floor(hash3(i, j, seed ^ 13) * 4);
+    const SW2 = 3;                                    // meia largura do ramal
+    const depth = Math.round(Math.min(iw, id_) * (0.55 + 0.2 * hash3(i, j, seed ^ 17)));
+    const cx = Math.round((bx0 + bx1) / 2), cz = Math.round((bz0 + bz1) / 2);
+    let ex, ez;                                       // ponta do balão
+    if (side === 0){ ex = cx; ez = bz0 + depth; paintMat(B, cx - SW2, bz0 - CFG.SIDEWALK_W, cx + SW2, ez, MAT_ASFALTO); }
+    else if (side === 1){ ex = cx; ez = bz1 - depth; paintMat(B, cx - SW2, ez, cx + SW2, bz1 + CFG.SIDEWALK_W, MAT_ASFALTO); }
+    else if (side === 2){ ex = bx0 + depth; ez = cz; paintMat(B, bx0 - CFG.SIDEWALK_W, cz - SW2, ex, cz + SW2, MAT_ASFALTO); }
+    else { ex = bx1 - depth; ez = cz; paintMat(B, ex, cz - SW2, bx1 + CFG.SIDEWALK_W, cz + SW2, MAT_ASFALTO); }
+    paintDiscMat(B, ex, ez, SW2 + 2.2, MAT_ASFALTO);
+
+    // casas baixas nos retalhos que sobraram
+    const rects = [];
+    splitLots(bx0, bz0, bx1, bz1, 0, seed, rects);
+    let k = 0;
+    for (const r of rects){
+      const lot = newLot(B, seed, k++, r[0], r[1], r[2], r[3],
+                         Math.max(1, Math.round(floorsFor(dist, seed, k) * 0.30) + 1));
+      // não constrói em cima do ramal nem do balão
+      for (let tz = lot.z0; tz < lot.z1; tz++)
+        for (let tx = lot.x0; tx < lot.x1; tx++){
+          const mi = (tz - B.z0) * B.w + (tx - B.x0);
+          if (tx < B.x0 || tx >= B.x1 || tz < B.z0 || tz >= B.z1) continue;
+          if (B.mat[mi] === MAT_ASFALTO) continue;
+          const dx = tx + 0.5 - ex, dz = tz + 0.5 - ez;
+          if (dx * dx + dz * dz < (SW2 + 3.4) * (SW2 + 3.4)) continue;
+          B.height[mi] = lot.h; B.lotId[mi] = lot.id;
+        }
+    }
+    // postes ao longo do ramal e no balão
+    for (let q = 0; q < 3; q++){
+      const tq = 0.30 + q * 0.30;
+      const lx = lerp(side === 2 ? bx0 : (side === 3 ? bx1 : cx + SW2 + 1), ex, tq);
+      const lz = lerp(side === 0 ? bz0 : (side === 1 ? bz1 : cz + SW2 + 1), ez, tq);
+      pushLamp(B.lamps, lx, lz, CFG.LAMP_H_MIN + hash3(q, 3, seed) * 1.2, true);
+    }
+
   } else {
-    // praça: bancos e canteiros baixos + arborização
+    /* praça: canteiros baixos e arborização */
+    paintMat(B, bx0, bz0, bx1, bz1, MAT_VERDE);
     const n = 3 + Math.floor(hash3(i, j, seed) * 4);
     for (let k = 0; k < n; k++){
       const tw = 2 + Math.floor(hash3(k, 1, seed) * 3);
       const td = 2 + Math.floor(hash3(k, 2, seed) * 3);
       const px = Math.floor(lerp(bx0, bx1 - tw, hash3(k, 3, seed)));
       const pz = Math.floor(lerp(bz0, bz1 - td, hash3(k, 4, seed)));
-      const h  = 1 + Math.floor(hash3(k, 5, seed) * 2);
+      const hh = 1 + Math.floor(hash3(k, 5, seed) * 2);
       for (let tz = pz; tz < pz + td; tz++)
-        for (let tx = px; tx < px + tw; tx++)
-          if (tx >= x0 && tx < x1 && tz >= z0 && tz < z1) B.height[(tz - z0) * w + (tx - x0)] = h;
+        for (let tx = px; tx < px + tw; tx++) tileSet(B, tx, tz, hh, 0);
     }
-    const nt = 4 + Math.floor(hash3(i, j, seed ^ 9) * 6);
-    for (let k = 0; k < nt; k++){
-      B.trees.push({
-        x: lerp(bx0 + 1, bx1 - 1, hash3(k, 11, seed)),
-        z: lerp(bz0 + 1, bz1 - 1, hash3(k, 12, seed)),
-        h: 4.2 + hash3(k, 13, seed) * 3.0,
-        seed: (seed + k * 977) & 0x7fff
-      });
-    }
+    scatterTrees(B, seed, bx0, bz0, bx1, bz1, 4 + Math.floor(hash3(i, j, seed ^ 9) * 6));
   }
 
-  /* postes: nas quatro testadas, no eixo da calçada */
+  /* postes: nas quatro testadas, no eixo da calçada. Vêm depois dos do
+     ramal, e todos passam pela mesma guarda de distância mínima. */
   const s = CFG.SIDEWALK_W / 2;
   lampsAlong(B.lamps, z0 + s, x0 + 3, x1 - 3, true,  seed ^ 1, B);
   lampsAlong(B.lamps, z1 - s, x0 + 3, x1 - 3, true,  seed ^ 2, B);
@@ -337,6 +568,10 @@ function makeBlock(i, j){
   for (const L of B.lamps){
     B.lights.push({ x: L.x, y: L.h, z: L.z, r: L.r, g: L.g, b: L.b,
                     rad: 13, inten: 1.15, baseInten: 1.15, lamp: true });
+  }
+  for (const bc of B.beacons){
+    B.lights.push({ x: bc.x, y: bc.y, z: bc.z, r: 1.0, g: 0.22, b: 0.18,
+                    rad: 9, inten: 0.9, baseInten: 0.9, beacon: bc });
   }
   for (const bb of B.bbs){
     const cx = bb.axis === 0 ? bb.plane + bb.nrm * 1.8 : (bb.u0 + bb.u1) / 2;
@@ -373,18 +608,22 @@ function addBillboards(B, lot, bx0, bz0, bx1, bz1){
 
     const wBB = Math.min(span - 1.5, 7 + hash3(lot.seed, 45 + k, WSEED) * 10);
     const u0 = f.a + (span - wBB) * (0.15 + 0.7 * hash3(lot.seed, 46 + k, WSEED));
-    const screen = hash3(lot.seed, 47 + k, WSEED) < 0.40;
-    const hBB = screen ? 4.0 + hash3(lot.seed, 48 + k, WSEED) * 5.0
+    const rk = hash3(lot.seed, 47 + k, WSEED);
+    const arte = rk < 0.34, screen = !arte && rk < 0.60;
+    const hBB = arte   ? 4.6 + hash3(lot.seed, 48 + k, WSEED) * 4.4
+              : screen ? 4.0 + hash3(lot.seed, 48 + k, WSEED) * 5.0
                        : 3.2 + hash3(lot.seed, 49 + k, WSEED) * 2.6;
     const yTop = Math.min(lot.h - 1.0, 5 + hash3(lot.seed, 50 + k, WSEED) * (lot.h - 7));
     const y0 = yTop - hBB;
     if (y0 < 3.2) continue;
 
     const c = NEON[Math.floor(hash3(lot.seed, 51 + k, WSEED) * NEON.length) % NEON.length];
+    const a0 = Math.floor(hash3(lot.seed, 60 + k, WSEED) * SPLASH.length);
+    const a1 = (a0 + 1 + Math.floor(hash3(lot.seed, 61 + k, WSEED) * (SPLASH.length - 1))) % SPLASH.length;
     B.bbs.push({
       axis: f.axis, plane: f.plane, nrm: f.nrm,
       u0, u1: u0 + wBB, y0, y1: yTop,
-      screen,
+      screen, arte, arts: arte ? [a0, a1] : null,
       r: c[0], g: c[1], b: c[2],
       text: ADS[Math.floor(hash3(lot.seed, 52 + k, WSEED) * ADS.length) % ADS.length],
       phase: hash3(lot.seed, 53 + k, WSEED) * 10,
@@ -446,6 +685,7 @@ for (let k = 0; k < lgBuckets.length; k++) lgBuckets[k] = [];
 let lgOx = 0, lgOz = 0, lgKey = "";
 const signLights = [];        // só as luzes de painel, para o pulso por frame
 const lampLights = [];        // postes: apagam quando amanhece
+const beaconLights = [];      // balizas de topo de torre, piscando
 
 function rebuildLights(px, pz){
   const bi = idxX(px), bj = idxZ(pz);
@@ -458,6 +698,7 @@ function rebuildLights(px, pz){
   for (let k = 0; k < lgBuckets.length; k++) lgBuckets[k].length = 0;
   signLights.length = 0;
   lampLights.length = 0;
+  beaconLights.length = 0;
 
   for (let dj = -3; dj <= 3; dj++){
     for (let di = -3; di <= 3; di++){
@@ -470,6 +711,7 @@ function rebuildLights(px, pz){
         lgBuckets[cz * LG_N + cx].push(L);
         if (L.bb) signLights.push(L);
         else if (L.lamp) lampLights.push(L);
+        else if (L.beacon) beaconLights.push(L);
       }
     }
   }
@@ -898,13 +1140,21 @@ function groundColor(wx, wz, out){
   const tx = Math.floor(wx), tz = Math.floor(wz);
   const B = blockAtTile(tx, tz);
   if (B){
-    const inner = wx > B.x0 + CFG.SIDEWALK_W && wx < B.x1 - CFG.SIDEWALK_W &&
-                  wz > B.z0 + CFG.SIDEWALK_W && wz < B.z1 - CFG.SIDEWALK_W;
+    const m = B.mat[(tz - B.z0) * B.w + (tx - B.x0)];
+    if (m === MAT_ASFALTO){                            // ramal da rua sem saída
+      const a = 0.108 + 0.012 * hash3(tx, tz, 3);
+      out[0] = a; out[1] = a * 0.99; out[2] = a * 0.95;
+      return;
+    }
+    if (m === MAT_VERDE){                              // praça / pátio: grama
+      const g = 0.115 + 0.055 * hash3(tx * 2, tz * 2, 5);
+      out[0] = g * 0.55; out[1] = g * 1.15; out[2] = g * 0.50;
+      return;
+    }
     // calçada: placas de 2 m com junta escura
     const jx = Math.abs((wx * 0.5) % 1 - 0.5), jz = Math.abs((wz * 0.5) % 1 - 0.5);
     const joint = (jx > 0.46 || jz > 0.46) ? 0.45 : 1.0;
-    const base = inner ? 0.20 : 0.30;                  // miolo de praça x calçada
-    out[0] = base * joint; out[1] = base * joint * 1.02; out[2] = base * joint * 1.12;
+    out[0] = 0.150 * joint; out[1] = 0.156 * joint; out[2] = 0.180 * joint;
     return;
   }
   // asfalto + faixa central tracejada no eixo da rua
@@ -914,7 +1164,7 @@ function groundColor(wx, wz, out){
   let mark = 0;
   if (dxs < HALF_ST && Math.abs(wx - cxs) < 0.16 && ((wz * 0.22) % 1) < 0.5) mark = 1;
   if (dzs < HALF_ST && Math.abs(wz - czs) < 0.16 && ((wx * 0.22) % 1) < 0.5) mark = 1;
-  const a = 0.115 + mark * 0.85;
+  const a = 0.105 + mark * 0.85;
   out[0] = a; out[1] = a * 0.99; out[2] = a * 0.95;
 }
 const gcol = [0, 0, 0];
@@ -962,6 +1212,16 @@ function screenBar(bb, c, t){
 }
 function framePulse(bb){ return 0.75 + 0.25 * Math.sin(TIME * 3 + bb.phase); }
 
+/** qual peça está no ar agora e quanto o painel está aceso na troca */
+const ART_PERIOD = 9;
+function artNow(bb){
+  const tt = TIME / ART_PERIOD + bb.phase;
+  const idx = bb.arts[Math.floor(tt) % bb.arts.length];
+  const p = tt - Math.floor(tt);
+  const fade = p < 0.07 ? p / 0.07 : (p > 0.93 ? (1 - p) / 0.07 : 1);
+  return { art: SPLASH[idx], fade };
+}
+
 function billboardCell(bb, u, wy, out){
   const w = bb.u1 - bb.u0, h = bb.y1 - bb.y0;
   const ul = bb.nrm > 0 ? (u - bb.u0) : (bb.u1 - u);   // texto sempre legível de fora
@@ -972,6 +1232,28 @@ function billboardCell(bb, u, wy, out){
     const p = framePulse(bb);
     out[0] = bb.r * EM_FRAME * p; out[1] = bb.g * EM_FRAME * p; out[2] = bb.b * EM_FRAME * p;
     return ci("█");
+  }
+
+  if (bb.arte){
+    // painel de LED rodando uma peça de arte ASCII
+    const { art, fade } = artNow(bb);
+    const iw = w - 0.7, ih = h - 0.6;
+    // a peça foi desenhada para célula de terminal (~1:1,7), não quadrada:
+    // sem corrigir isso o desenho sai achatado no painel
+    const AR = 1.7;
+    const cw2 = Math.min(iw / art.w, ih / (art.h * AR)), ch2 = cw2 * AR;
+    const ax = Math.floor((ul - 0.35 - (iw - art.w * cw2) / 2) / cw2);
+    const ay = Math.floor((vl - 0.30 - (ih - art.h * ch2) / 2) / ch2);
+    if (ax >= 0 && ay >= 0 && ax < art.w && ay < art.h){
+      const ch = art.l[ay][ax];
+      if (ch !== " "){
+        const e = EM_LETTER * fade;
+        out[0] = bb.r * e; out[1] = bb.g * e; out[2] = bb.b * e;
+        return ci(ch);
+      }
+    }
+    out[0] = bb.r * EM_OFF * 0.45; out[1] = bb.g * EM_OFF * 0.45; out[2] = bb.b * EM_OFF * 0.6;
+    return ci("░");
   }
 
   if (bb.screen){
@@ -1023,7 +1305,11 @@ function billboardDuty(bb){
   let flux = (area - inner) * EM_FRAME * framePulse(bb);
   let litInner = 0;
 
-  if (bb.screen){
+  if (bb.arte){
+    const { art, fade } = artNow(bb);
+    litInner = inner * art.ink * fade;
+    flux += litInner * EM_LETTER;
+  } else if (bb.screen){
     const nc = Math.max(1, Math.floor(innerW / 0.62));
     const t = TIME * bb.speed + bb.phase;
     let sum = 0;
@@ -1051,6 +1337,10 @@ function updateSignLights(){
   // poste de rua acende no fim da tarde e apaga de manhã
   const lampOn = clamp(ENV.neon * 1.25 - 0.12, 0, 1);
   for (let k = 0; k < lampLights.length; k++) lampLights[k].inten = lampLights[k].baseInten * lampOn;
+  for (let k = 0; k < beaconLights.length; k++){
+    const L = beaconLights[k];
+    L.inten = L.baseInten * (((TIME * 0.85 + L.beacon.seed * 0.013) % 1) < 0.42 ? 1 : 0.05);
+  }
   for (let k = 0; k < signLights.length; k++){
     const L = signLights[k];
     const duty = billboardDuty(L.bb);
@@ -1394,13 +1684,31 @@ function drawDeck(){
   }
 }
 
+/** baliza no alto da torre: pisca em vermelho, visível de longe */
+function drawBeacon(bc){
+  const p = spriteProject(bc.x, bc.z);
+  if (!p) return;
+  const on = ((TIME * 0.85 + bc.seed * 0.013) % 1) < 0.42;
+  const t = p.t;
+  const y = Math.round(horizon - (bc.y - cam.eye) * projV / t);
+  const cx = Math.round(p.col);
+  if (cx < 0 || cx >= COLS || y < 0 || y >= ROWS || t >= zbuf[cx]) return;
+  const i = y * COLS + cx;
+  cellDep[i] = t; cellId[i] = nextSpriteId();
+  const k = on ? 3.4 : 0.25;
+  emit(i, 1.0 * k, 0.22 * k, 0.18 * k);
+}
+
 function renderSprites(){
   const bi = idxX(cam.x), bj = idxZ(cam.z);
-  for (let dj = -2; dj <= 2; dj++){
-    for (let di = -2; di <= 2; di++){
+  for (let dj = -3; dj <= 3; dj++){
+    for (let di = -3; di <= 3; di++){
       const B = getBlock(bi + di, bj + dj);
-      for (let k = 0; k < B.lamps.length; k++) drawLamp(B.lamps[k]);
-      for (let k = 0; k < B.trees.length; k++) drawTree(B.trees[k]);
+      if (Math.abs(di) <= 2 && Math.abs(dj) <= 2){
+        for (let k = 0; k < B.lamps.length; k++) drawLamp(B.lamps[k]);
+        for (let k = 0; k < B.trees.length; k++) drawTree(B.trees[k]);
+      }
+      for (let k = 0; k < B.beacons.length; k++) drawBeacon(B.beacons[k]);
     }
   }
 }

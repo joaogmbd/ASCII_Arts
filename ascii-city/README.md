@@ -38,6 +38,7 @@ atalhos continuam valendo como caminho rápido:
 | `W` `A` `S` `D` | andar |
 | mouse | olhar |
 | `SHIFT` | correr |
+| `ESPAÇO` | pular (também no skate) |
 | `K` | pegar / largar o skate |
 | `ESC` | abre o menu |
 | `C` | cor ↔ mono |
@@ -131,6 +132,66 @@ Segue como se desenha um plano viário de verdade:
 Verificado por teste sobre 256 quarteirões: **zero sobreposições e 100 % das
 caixas de rua com exatamente 12 m**.
 
+### Formatos de quarteirão
+
+A caixa da rua e a calçada são as mesmas em toda a cidade — o que varia é o
+**miolo**. Cada quarteirão sorteia um formato, e todos trabalham dentro do lote,
+então o plano viário nunca é violado:
+
+| formato | o que é |
+|---|---|
+| `grid` | loteamento retangular por subdivisão binária |
+| `torre` | torre cilíndrica escalonada no meio, praça verde em volta, baliza piscando no topo |
+| `cunha` | uma diagonal corta o quarteirão em dois triângulos: um alto, um baixo |
+| `patio` | anel de prédios em volta de um pátio interno arborizado |
+| `vila` | **rua sem saída**: um ramal entra do meio de uma testada e termina num balão de retorno, com casas baixas em volta |
+| `praca` | canteiros baixos e árvores |
+
+Torre e rua sem saída em planta (`@`/`O`/`o` prédio por altura, `.` rua,
+`,` ramal sem saída, `"` verde, espaço calçada):
+
+```
+....                                                  ....
+....                                                  ....
+....   """""""""""""""""""OOOOOO"""""""""""""""""""   ....
+....   """""""""""""""OOOOOOOOOOOOOO"""""""""""""""   ....
+....   """""""""""""OOOO@@@@@@@@@@OOOO"""""""""""""   ....
+....   """"""""""""OOO@@@@@@@@@@@@@@OOO""""""""""""   ....
+....   """"""""""""OO@@@@@@@@@@@@@@@@OO""""""""""""   ....
+....   """""""""""OOO@@@@@@@@@@@@@@@@OOO"""""""""""   ....
+....   """"""""""""OO@@@@@@@@@@@@@@@@OO""""""""""""   ....
+....   """"""""""""OOO@@@@@@@@@@@@@@OOO""""""""""""   ....
+....   """""""""""""OOOO@@@@@@@@@@OOOO"""""""""""""   ....
+....   """""""""""""""OOOOOOOOOOOOOO"""""""""""""""   ....
+....   """""""""""""""""""OOOOOO"""""""""""""""""""   ....
+....                                                  ....
+....                                                  ....
+```
+
+```
+....   OOOOOOOOOOOOOOOooooooooooooOOOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOoooo      ooOOOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOoo ,,,,,,,, OOOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOo ,,,,,,,,,, OOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOo ,,,,,,,,,, OOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOo ,,,,,,,,,, OOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOoo  ,,,,,,  OOOOOOOOOOOOOOOOO   ....
+....   OOOOOOOOOOOOOOOoooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOOOOOoooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOOOOOoooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....   OOOOOOOOOOOoooooooo,,,,,,ooooooooooooooooooo   ....
+....                      ,,,,,,                      ....
+```
+
+Verificado em 256 quarteirões com todos os formatos ativos: **zero
+sobreposições e 100 % das caixas de rua com exatamente 12 m**.
+
 ### O que é procedural
 
 | | como |
@@ -155,9 +216,15 @@ letreiro na fachada vizinha.
 
 ![telão](docs/screen.png)
 
-Os **outdoors** desenham o texto com uma fonte matricial 5×7 em blocos, como um
-painel de LED: de perto dá para ler a mensagem passando, de longe vira um borrão
-colorido — igual na rua. Os **telões** rodam um equalizador animado.
+Os painéis vêm em três tipos. Os **outdoors** desenham o texto com uma fonte
+matricial 5×7 em blocos, como um painel de LED: de perto dá para ler a mensagem
+passando, de longe vira um borrão colorido — igual na rua. Os **telões** rodam
+um equalizador animado. E os **painéis de arte** rodam peças de arte ASCII de
+verdade, trocando a cada nove segundos, com o painel apagando na troca — a arte
+foi desenhada para célula de terminal, então é reescalada com a proporção certa
+para não sair achatada.
+
+![splash art](docs/splash.png)
 
 #### A luz do painel é a densidade do que ele está mostrando
 
@@ -181,6 +248,31 @@ outdoor entre **0,10 e 0,23**. Num ponto da calçada a 7 m do painel, a
 luminância vai de **0,48 a 0,81 (+69 %)** ao longo do ciclo, e a densidade média
 de caracteres de todo o piso visível sobe **5,6 %** — a rua responde em texto ao
 texto do letreiro.
+
+## Ciclo do dia e clima
+
+![tarde](docs/tarde.png)
+
+Uma volta completa leva **10 minutos**. Tudo que descreve o ambiente vem de
+quadros-chave interpolados — céu (zênite e horizonte), luz-chave e sua direção,
+ambiente, rebote, névoa, estrelas, quanto o neon está aceso e a íris da
+exposição. O sol e a lua atravessam o céu como disco, junto com a luz-chave.
+
+A íris não é enfeite: a mesma cena fica dezenas de vezes mais clara de dia, e
+sem comprimir isso a rampa de caracteres satura inteira. O ajuste deixa o dia
+visivelmente mais **denso** que a noite sem estourar — que é como o olho
+funciona. Postes de rua acendem no fim da tarde e apagam de manhã; as janelas
+acesas rareiam de dia.
+
+![clima](docs/clima.png)
+
+O clima alterna entre **limpo, chuva, neve e tempestade** em trechos
+determinísticos, com rampa de transição. As gotas ficam num cilindro em
+coordenada de mundo e são projetadas como qualquer sprite, passando pelo
+z-buffer — ganham paralaxe e perspectiva de graça. A densidade é baixa de
+propósito: molha a cena sem sujar a leitura do texto. O asfalto molhado escurece
+e reflete mais, o que acende as poças sob os postes, e a tempestade tem
+relâmpago que clareia o céu e a chuva por um instante.
 
 ## O skate
 
@@ -222,3 +314,10 @@ conjuntos de caracteres e seis tamanhos de célula trocam em tempo real:
 A v1 usava WebGL2 com MRT, Sobel em luminância + normais, e composição de glifos
 num shader — a técnica de "graphics to text" popularizada pelo Acerola. Está no
 histórico do git, em `178d2b8`.
+
+## Créditos
+
+- Ideia central: ASCII CITY Prototype 1, Grow Now! Games —
+  <https://ko-fi.com/s/e1e0f91951>
+- Arte ASCII dos painéis: <https://ascii.co.uk/art>, mantida com a assinatura
+  de quem a fez (lmg, anubis, mark, sk, ejm, jgs)
