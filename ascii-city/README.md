@@ -44,10 +44,37 @@ atalhos continuam valendo como caminho rápido:
 | `C` | cor ↔ mono |
 | `E` | entrar na porta / descer do telhado |
 | `L` | luz dinâmica · `O` contornos · `M` minimapa |
-| `[` `]` | tamanho do caractere (6×10 até 14×25 px) |
+| `[` `]` | resolução (célula de 4×7 até 14×25 px) |
 | `1` `2` `3` `4` | conjunto de caracteres |
 | `G` | outro mundo · `R` respawn · `F` tela cheia |
 | `,` `.` | exposição · `;` `'` nível de preto |
+
+O seletor **resolução** troca o tamanho da célula, de 14×25 px até 4×7 px, e
+mostra a grade que sai daí. Célula menor é mais caractere na mesma tela, e mais
+caractere é imagem mais fina — é literalmente aumentar a resolução do monitor,
+e custa quadro na mesma proporção (medido em renderização por software, sem
+GPU nenhuma, numa janela de 1600×900):
+
+| célula | grade | células | ms/quadro |
+|---|---|---|---|
+| 14×25 | 114×36 | 4 104 | 4,2 |
+| 12×21 | 133×42 | 5 586 | 5,1 |
+| 10×17 | 160×52 | 8 320 | 6,7 |
+| 8×14 (padrão) | 200×64 | 12 800 | 9,3 |
+| 7×12 | 228×75 | 17 100 | 12 |
+| 6×10 | 266×90 | 23 940 | 15 |
+| 5×9 | 320×100 | 32 000 | 20 |
+| 4×7 | 400×128 | 51 200 | 26 |
+
+Chegar nesses números pedia duas otimizações, porque na densidade máxima o
+quadro custava o triplo disso. A **curva de tom virou tabela**: exposição, gama
+e rampa são fixas dentro do quadro, então o `exp` e o `pow` por célula viraram
+uma consulta. E a **luz do piso passou a ter memória**: perto do observador
+dezenas de linhas caem dentro do mesmo palmo de chão, e refazer a varredura de
+luzes em cada uma era o maior custo do quadro — agora ela só é refeita quando o
+ponto andou mais de 35 cm.
+
+![resolução](docs/resolucao.png)
 
 O menu também traz duas barras contínuas:
 
@@ -129,6 +156,30 @@ próximo trecho não repintar o que ficou na frente. A marcha para quando um til
 praticamente não muda. E é isso que torna o telhado um lugar de verdade: subir
 num prédio de 76 m e olhar para baixo devolve 1,2 m de distância na base da
 tela, não os 56 m que a fórmula do plano único devolvia.
+
+**A vertical é cilíndrica.** Um raycaster inclina a câmera por
+cisalhamento: a linha do horizonte anda `tan(pitch)·projV` e o resto da conta
+continua linear. É exato perto do centro e custa nada, mas a tangente explode —
+a 80° para baixo a tela inteira vira meio metro de chão esticado. Por isso o
+pitch vivia preso perto de ±45°, e nesse projeto isso passou a doer: subir num
+prédio de 76 m e não poder olhar para baixo tira o sentido de ter subido.
+
+Aqui a **linha** da tela é um ângulo, não um deslocamento. O eixo horizontal
+continua plano — é ele que garante que uma coluna inteira tem uma direção só,
+que é o que torna o DDA por coluna possível — e só o vertical vira cilíndrico:
+
+```
+   linear (cisalhamento)          angular (cilíndrico)
+   linha = h·projV/d + horiz      linha = horiz − atan(h/d)·projV
+   horiz = ROWS/2 + tan(p)·projV  horiz = ROWS/2 + p·projV
+   ±45° usável, ±90° explode      ±83° usável, sem singularidade
+```
+
+Como `tan x ≈ x` para x pequeno, no centro da tela o resultado é o mesmo de
+antes; a diferença aparece nos extremos, que é justamente onde o outro
+quebrava. E o arco-tangente não entra no laço interno: cada linha guarda a sua
+tangente numa tabela montada uma vez por quadro, e a marcha de superfície anda
+por essa tabela em vez de resolver a linha por conta.
 
 **Contornos geométricos, não Sobel.** A v1 procurava bordas na imagem. Aqui não
 há imagem — há o z-buffer da própria grade de caracteres, mais um id de
@@ -237,6 +288,46 @@ sobreposições e 100 % das caixas de rua com exatamente 12 m**.
 | postes | vão sorteado em [10 m, 15 m] e depois **corrigido** até caber de fato na faixa; altura em [4,2 m, 6,2 m]. Medido: menor distância real entre dois postes = 9,3 m |
 | outdoors e telões | fachada que dá para a rua, posição, tamanho, cor, texto e animação |
 | praças | 9 % dos quarteirões, com canteiros e arborização |
+
+### Chão
+
+![chao](docs/chao.png)
+
+O chão era liso: um valor por tile de 1 m, e o asfalto um valor só. Numa grade
+de caracteres isso vira um bloco chapado — e à noite, com a luminância abaixo do
+nível de preto, virava **nada**: telhado e calçada sumiam de vez quando se subia
+num prédio ou num canteiro. Hoje cada superfície horizontal tem material próprio:
+
+| superfície | o que a compõe |
+|---|---|
+| asfalto | agregado fino, remendos largos e a faixa central tracejada |
+| calçada | placas de 2 m com junta, cada placa com o seu tom, grão de concreto |
+| grama | tufo curto sobre uma variação larga de canteiro |
+| laje | manta asfáltica em faixas de 3 m, brita por cima, tom por prédio |
+| sebe | topo do canteiro da praça, que também se sobe |
+
+Duas coisas fazem isso funcionar numa tela de caracteres:
+
+- **O grão é multiplicativo, não somado.** Uma amplitude fixa dá textura ao
+  meio-dia e nada à noite, porque lá embaixo na curva de tom a rampa quase não
+  tem degraus para gastar. Como fator, o mesmo contraste relativo sobrevive em
+  qualquer luz.
+- **A oitava fina segue a distância.** Olhando o próprio pé, um caractere cobre
+  menos de um centímetro de chão; no fundo da rua cobre metros. Uma escala só
+  vira bloco chapado de um lado e chiado piscante do outro, então a frequência
+  é escolhida por distância, para dar ~2 células de tela por célula de grão. O
+  ruído continua indexado em coordenada de **mundo**, e as oitavas são travadas
+  em potências de 2 — ruído que acompanha a câmera continuamente "nada" na tela,
+  que foi exatamente o que estourou a copa das árvores um dia.
+
+Junto vieram dois acertos de conta. `%` em JavaScript guarda o sinal, então
+`(wx*0.5) % 1` é negativo no lado negativo do mundo: metade da cidade caía
+inteira dentro da junta da calçada, com a faixa da rua contínua em vez de
+tracejada. E o brilho de céu de cidade (o `amb`, que pesa por quanto a
+superfície olha para cima) subiu à noite — sem ele o asfalto ficava abaixo do
+nível de preto e era recortado para o vazio. Medido em degraus de rampa (de 15):
+o piso noturno saía em 0 — literalmente branco — e hoje sai em 2,8 longe de
+poste, 7,1 embaixo de um, e 11 à tarde.
 
 ### Luz
 
@@ -366,9 +457,13 @@ na tela fora do menu.
 ![topo](docs/topo.png)
 
 `E` teleporta para a laje, 3,2 m para dentro da fachada, e o telhado é chão como
-qualquer outro: dá para andar nele, correr, andar de skate e pular. De cima, com
-a barra de alcance aberta, a cidade vira um mar de lajes até a névoa. Para
-voltar há dois caminhos:
+qualquer outro: dá para andar nele, correr, andar de skate e pular — e para
+**olhar para baixo**, que é o que a projeção cilíndrica passou a permitir. De
+cima, com a barra de alcance aberta, a cidade vira um mar de lajes até a névoa.
+
+![olhando para baixo](docs/olhando.png)
+
+Para voltar há dois caminhos:
 
 - **pular** — a queda é a física normal do jogo, e a colisão por altura vai
   parando em cada laje que estiver no caminho;

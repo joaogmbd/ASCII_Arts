@@ -802,10 +802,10 @@ let dayStart = 0.72;                    // começa de noite, cara do projeto
 /* t, céu(zênite), céu(horizonte), ambiente, rebote, luz-chave, elevação,
    névoa, estrelas, neon, íris, nome                                    */
 const DAY_KEYS = [
-  { t:0.00, zen:[0.007,0.010,0.024], hor:[0.048,0.034,0.078], amb:[0.030,0.038,0.068],
+  { t:0.00, zen:[0.007,0.010,0.024], hor:[0.048,0.034,0.078], amb:[0.165,0.180,0.250],
     bou:[0.058,0.032,0.018], key:[0.085,0.098,0.140], el:0.62, fog:[0.016,0.016,0.030],
     star:1.0, neon:1.00, exp:1.00, name:"noite" },
-  { t:0.07, zen:[0.045,0.045,0.090], hor:[0.520,0.250,0.230], amb:[0.105,0.092,0.130],
+  { t:0.07, zen:[0.045,0.045,0.090], hor:[0.520,0.250,0.230], amb:[0.150,0.140,0.180],
     bou:[0.090,0.050,0.030], key:[0.560,0.300,0.230], el:0.04, fog:[0.120,0.075,0.080],
     star:0.30, neon:0.80, exp:0.92, name:"amanhecer" },
   { t:0.18, zen:[0.150,0.290,0.610], hor:[0.520,0.630,0.840], amb:[0.620,0.700,0.880],
@@ -814,16 +814,16 @@ const DAY_KEYS = [
   { t:0.42, zen:[0.125,0.255,0.575], hor:[0.600,0.650,0.780], amb:[0.640,0.710,0.880],
     bou:[0.105,0.092,0.075], key:[1.100,1.000,0.850], el:0.86, fog:[0.320,0.380,0.490],
     star:0.0, neon:0.12, exp:0.83, name:"tarde" },
-  { t:0.56, zen:[0.095,0.150,0.400], hor:[0.940,0.500,0.230], amb:[0.235,0.210,0.265],
+  { t:0.56, zen:[0.095,0.150,0.400], hor:[0.940,0.500,0.230], amb:[0.270,0.245,0.300],
     bou:[0.140,0.080,0.040], key:[1.200,0.640,0.300], el:0.11, fog:[0.310,0.190,0.150],
     star:0.0, neon:0.45, exp:0.90, name:"por do sol" },
-  { t:0.66, zen:[0.035,0.045,0.120], hor:[0.400,0.170,0.330], amb:[0.090,0.088,0.155],
+  { t:0.66, zen:[0.035,0.045,0.120], hor:[0.400,0.170,0.330], amb:[0.145,0.140,0.200],
     bou:[0.110,0.055,0.040], key:[0.330,0.190,0.290], el:0.02, fog:[0.090,0.050,0.085],
     star:0.55, neon:0.90, exp:0.96, name:"anoitecer" },
-  { t:0.78, zen:[0.007,0.010,0.024], hor:[0.048,0.034,0.078], amb:[0.030,0.038,0.068],
+  { t:0.78, zen:[0.007,0.010,0.024], hor:[0.048,0.034,0.078], amb:[0.165,0.180,0.250],
     bou:[0.058,0.032,0.018], key:[0.085,0.098,0.140], el:0.62, fog:[0.016,0.016,0.030],
     star:1.0, neon:1.00, exp:1.00, name:"noite" },
-  { t:1.00, zen:[0.007,0.010,0.024], hor:[0.048,0.034,0.078], amb:[0.030,0.038,0.068],
+  { t:1.00, zen:[0.007,0.010,0.024], hor:[0.048,0.034,0.078], amb:[0.165,0.180,0.250],
     bou:[0.058,0.032,0.018], key:[0.085,0.098,0.140], el:0.62, fog:[0.016,0.016,0.030],
     star:1.0, neon:1.00, exp:1.00, name:"noite" }
 ];
@@ -974,7 +974,7 @@ function drawWeather(){
     const sx = dx * rgtX + dz * rgtZ;
     const cx = Math.round(COLS / 2 + (sx / t / tanH) * (COLS / 2));
     if (cx < 0 || cx >= COLS || t >= zbuf[cx]) continue;
-    const yy = horizon - (dropY[i] - cam.eye) * projV / t;
+    const yy = rowAt(dropY[i] - cam.eye, t);
     const len = snow ? 0 : clamp(Math.round(0.24 * projV / t * dropV[i]), 0, 4);
     const near = clamp(1 - t / DROP_R, 0, 1);
     const k = (0.42 + 0.58 * near) * boost * clamp(0.55 + 0.45 * ENV.fall, 0, 1);
@@ -1019,7 +1019,11 @@ function setCharset(k){
   RAMP = Uint8Array.from(Array.from(CHARSETS[k].ramp), c => ci(c));
 }
 
-const CELL_SIZES = [[6,10],[7,12],[8,14],[10,17],[12,21],[14,25]];
+/*  Resolução: quanto menor a célula, mais caracteres cabem na tela e mais
+    fina fica a imagem — é literalmente aumentar a resolução do "monitor".
+    Custa quadro: dobrar a densidade nos dois eixos quadruplica o número de
+    células, e cada célula é um raio que anda.                            */
+const CELL_SIZES = [[4,7],[5,9],[6,10],[7,12],[8,14],[10,17],[12,21],[14,25]];
 let cellW = 8, cellH = 14;
 
 let glyphOff = [], glyphLv = [];  // por glifo: offsets no framebuffer + nível
@@ -1090,12 +1094,32 @@ function blit(){
 /* ------------------------------------------------------------------ */
 
 const cam = { x: 0, z: 0, yaw: 0, pitch: 0, eye: CFG.EYE };
-const TUNE = { exposure: 6.2, gamma: 0.82, black: 0.014, fov: 74 * Math.PI / 180,
+const TUNE = { exposure: 6.2, gamma: 0.82, black: 0.006, fov: 74 * Math.PI / 180,
                dist: CFG.FOG };   // alcance de visão, ajustável no menu
 let colorMode = true;
 let TIME = 0;
 
 let projH = 0, projV = 0, horizon = 0, tanH = 0;
+
+/* ---- projeção vertical cilíndrica ---------------------------------
+   Um raycaster clássico inclina a câmera por cisalhamento: a linha do
+   horizonte anda `tan(pitch)·projV` e o resto da conta continua linear.
+   É exato perto do centro da tela e barato, mas a tangente explode: a
+   80° para baixo a tela inteira vira meio metro de chão esticado, e por
+   isso o pitch tinha de ficar preso em ±49°.
+
+   Aqui a LINHA da tela vira um ÂNGULO em vez de um deslocamento. O eixo
+   horizontal continua plano — é ele que garante que uma coluna inteira
+   tem uma direção só, que é o que torna o DDA por coluna possível — e só
+   o vertical passa a ser cilíndrico. Perto do centro dá exatamente no
+   mesmo (tan x ≈ x para x pequeno); nos extremos passa a ser possível
+   olhar para cima e para baixo de verdade, sem singularidade.          */
+let rowTan = null;                  // tangente da elevação de cada linha
+const ANG_MAX = Math.PI / 2 - 1e-3; // além disso a linha olharia para trás
+const PITCH_MAX = 1.45;             // 83°: quase a pino, sem chegar aos 90°
+
+/** linha (contínua) onde cai um ponto a `dy` de altura e `d` de distância */
+function rowAt(dy, d){ return horizon - Math.atan(dy / d) * projV; }
 let dirX = 0, dirZ = 0, rgtX = 0, rgtZ = 0;
 let zbuf = null, rdxs = null, rdzs = null;
 
@@ -1113,15 +1137,37 @@ const hMapX = new Int32Array(MAXHIT);
 const hMapZ = new Int32Array(MAXHIT);
 
 /** luminância -> glifo + cor (o coração do "de fato ASCII") */
+/*  A curva de tom é fixa dentro do quadro: mesma exposição, mesma gama,
+    mesma rampa. Então ela vira tabela — sem isto são um `exp` e um `pow`
+    por célula, e em resolução alta esse é o segundo maior custo do frame
+    (o primeiro é a luz).                                               */
+const TONE_N = 2048;
+const toneT = new Float32Array(TONE_N);   // t (0..1) por luminância
+const toneG = new Uint8Array(TONE_N);     // glifo já escolhido
+let toneScale = 1, toneKey = "", toneRamp = null;
+function buildTone(){
+  const k = TUNE.exposure * ENV.exp;
+  const key = k.toFixed(5) + "|" + TUNE.gamma;
+  if (key === toneKey && toneRamp === RAMP) return;
+  toneKey = key; toneRamp = RAMP;
+  toneScale = (TONE_N - 1) / (6 / Math.max(1e-6, k));   // 6/k: aí t já saturou
+  for (let i = 0; i < TONE_N; i++){
+    const t = Math.pow(1 - Math.exp(-(i / toneScale) * k), TUNE.gamma);
+    toneT[i] = t;
+    const ri = (t * RAMP.length) | 0;
+    toneG[i] = RAMP[ri >= RAMP.length ? RAMP.length - 1 : ri];
+  }
+}
+
 function emit(idx, r, g, b){
-  let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b - TUNE.black;
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b - TUNE.black;
   if (lum <= 0){ cellChar[idx] = 0; return; }
-  let t = 1 - Math.exp(-lum * TUNE.exposure * ENV.exp);
-  t = Math.pow(t, TUNE.gamma);
-  let ri = (t * RAMP.length) | 0;
-  if (ri >= RAMP.length) ri = RAMP.length - 1;
-  cellChar[idx] = RAMP[ri];
-  if (RAMP[ri] === 0) return;
+  let i = (lum * toneScale) | 0;
+  if (i >= TONE_N) i = TONE_N - 1;
+  const gl = toneG[i];
+  cellChar[idx] = gl;
+  if (gl === 0) return;
+  const t = toneT[i];
 
   if (colorMode){
     const m = Math.max(r, Math.max(g, b)) || 1e-6;
@@ -1167,7 +1213,7 @@ function skyColumn(cx, topRow, ang, hx, hz){
   const sunI = 2.6 * (1 - ENV.star * 0.72);
   const km = Math.max(ENV.key[0], Math.max(ENV.key[1], ENV.key[2])) || 1;
   for (let y = 0; y < topRow; y++){
-    const elev = (horizon - y - 0.5) / projV;          // tangente da elevação
+    const elev = rowTan[y];                            // tangente da elevação
     const glow = Math.exp(-Math.abs(elev) * 2.6);
     let r = ENV.zen[0] + (ENV.hor[0] - ENV.zen[0]) * glow;
     let g = ENV.zen[1] + (ENV.hor[1] - ENV.zen[1]) * glow;
@@ -1194,49 +1240,124 @@ function skyColumn(cx, topRow, ang, hx, hz){
   }
 }
 
-/* ---- material do piso ------------------------------------------- */
-function groundColor(wx, wz, out){
-  const tx = Math.floor(wx), tz = Math.floor(wz);
-  const B = blockAtTile(tx, tz);
-  if (B){
-    const m = B.mat[(tz - B.z0) * B.w + (tx - B.x0)];
-    if (m === MAT_ASFALTO){                            // ramal da rua sem saída
-      const a = 0.108 + 0.012 * hash3(tx, tz, 3);
-      out[0] = a; out[1] = a * 0.99; out[2] = a * 0.95;
-      return;
-    }
-    if (m === MAT_VERDE){                              // praça / pátio: grama
-      const g = 0.115 + 0.055 * hash3(tx * 2, tz * 2, 5);
-      out[0] = g * 0.55; out[1] = g * 1.15; out[2] = g * 0.50;
-      return;
-    }
-    // calçada: placas de 2 m com junta escura
-    const jx = Math.abs((wx * 0.5) % 1 - 0.5), jz = Math.abs((wz * 0.5) % 1 - 0.5);
-    const joint = (jx > 0.46 || jz > 0.46) ? 0.45 : 1.0;
-    out[0] = 0.150 * joint; out[1] = 0.156 * joint; out[2] = 0.180 * joint;
-    return;
-  }
-  // asfalto + faixa central tracejada no eixo da rua
-  const cxs = (wx - mAX0) < (mAX1 - wx) ? mAX0 : mAX1;
-  const czs = (wz - mAZ0) < (mAZ1 - wz) ? mAZ0 : mAZ1;
-  const dxs = Math.abs(wx - cxs), dzs = Math.abs(wz - czs);
-  let mark = 0;
-  if (dxs < HALF_ST && Math.abs(wx - cxs) < 0.16 && ((wz * 0.22) % 1) < 0.5) mark = 1;
-  if (dzs < HALF_ST && Math.abs(wz - czs) < 0.16 && ((wx * 0.22) % 1) < 0.5) mark = 1;
-  const a = 0.105 + mark * 0.85;
+/* ---- material do piso -------------------------------------------
+   O chão era liso: um valor por tile de 1 m, e o asfalto um valor só.
+   Numa grade de caracteres isso vira um bloco chapado — e à noite, com a
+   luminância abaixo do nível de preto, vira nada. Aqui cada material tem
+   grão, e o grão é sempre indexado em COORDENADA DE MUNDO: foi assim que
+   a copa das árvores estourou um dia, com ruído em coordenada de tela
+   que "nadava" quando a câmera andava.
+
+   O grão não interpola. Numa tela de caracteres o degrau já é do tamanho
+   do pixel e a rampa tem ~15 níveis, então suavizar o ruído seria pagar
+   quatro hashes por célula para não mudar o glifo escolhido.           */
+function grain(wx, wz, s, k){
+  return hash3(Math.floor(wx * s), Math.floor(wz * s), k);
+}
+/** parte fracionária de verdade: `%` em JS guarda o sinal, e com isso o
+    lado negativo do mundo caía inteiro dentro da junta — meia cidade com
+    a calçada de uma cor só e a faixa da rua contínua em vez de tracejada */
+function fr(v){ return v - Math.floor(v); }
+
+/*  Uma escala de grão só não serve para a tela toda: olhando o próprio
+    pé, um caractere cobre menos de um centímetro de chão; no fundo da
+    rua cobre metros. Grão de 30 cm vira bloco chapado de perto, e grão
+    de 3 cm vira chiado piscante de longe.
+
+    Então a oitava fina é escolhida pela distância, para dar mais ou
+    menos duas células de tela por célula de grão. O ruído continua
+    indexado em coordenada de MUNDO — o que muda com a distância é só
+    qual oitava está em uso, e as oitavas são travadas em potências de 2
+    para a transição ser um degrau e não uma deriva contínua (ruído que
+    acompanha a câmera de forma contínua "nada" na tela: foi exatamente
+    o que estourou a copa das árvores).                                 */
+const OCT = [];
+for (let k = -3; k <= 6; k++) OCT.push(Math.pow(2, k));
+let octK = 1;                        // COLS / (2·tanH·alvo), por frame
+function octave(d){
+  let e = Math.round(Math.log2(octK / d));
+  if (e < -3) e = -3; else if (e > 6) e = 6;
+  return OCT[e + 3];
+}
+
+/*  O grão é multiplicativo, não somado. Somar uma amplitude fixa dá
+    textura no meio-dia e nada à noite, porque lá embaixo na curva de
+    tom a rampa de caracteres quase não tem degraus para gastar. Como
+    fator, o mesmo contraste relativo sobrevive em qualquer luz.        */
+
+/** asfalto: agregado fino, remendos largos e a faixa central */
+function asfalto(wx, wz, d, mark, out){
+  if (mark){ out[0] = 0.92; out[1] = 0.91; out[2] = 0.87; return; }
+  const a = 0.150 * (1 + 0.30 * (grain(wx, wz, 2.6, 3) - 0.5)
+                       + 0.24 * (grain(wx, wz, 0.22, 13) - 0.5)
+                       + 0.34 * (grain(wx, wz, octave(d), 7) - 0.5));
   out[0] = a; out[1] = a * 0.99; out[2] = a * 0.95;
 }
-const gcol = [0, 0, 0];
-
-/** laje de cobertura: piso de brita com juntas, visto de cima do prédio */
-function roofColor(wx, wz, h, out){
-  const tx = Math.floor(wx), tz = Math.floor(wz);
-  const n = hash3(tx, tz, 17);
-  const jx = Math.abs((wx * 0.25) % 1 - 0.5), jz = Math.abs((wz * 0.25) % 1 - 0.5);
-  const junta = (jx > 0.46 || jz > 0.46) ? 0.55 : 1.0;
-  const a = (0.145 + 0.055 * n) * junta;
+/** calçada: placas de 2 m, cada uma com o seu tom, mais grão de concreto */
+function calcada(wx, wz, d, out){
+  const junta = (Math.abs(fr(wx * 0.5) - 0.5) > 0.455 ||
+                 Math.abs(fr(wz * 0.5) - 0.5) > 0.455) ? 0.46 : 1.0;
+  const a = 0.200 * junta *
+            (1 + 0.30 * (hash3(Math.floor(wx * 0.5), Math.floor(wz * 0.5), 29) - 0.5)
+               + 0.18 * (grain(wx, wz, 3.4, 31) - 0.5)
+               + 0.30 * (grain(wx, wz, octave(d), 33) - 0.5));
+  out[0] = a; out[1] = a * 1.03; out[2] = a * 1.16;
+}
+/** grama: tufo curto por cima de uma variação larga de canteiro */
+function grama(wx, wz, d, out){
+  const g = 0.150 * (1 + 0.44 * (grain(wx, wz, 2.4, 5) - 0.5)
+                       + 0.30 * (grain(wx, wz, 0.5, 15) - 0.5)
+                       + 0.46 * (grain(wx, wz, octave(d), 9) - 0.5));
+  out[0] = g * 0.52; out[1] = g * 1.18; out[2] = g * 0.48;
+}
+/** laje: manta asfáltica em faixas de 3 m, brita por cima, tom por prédio */
+function laje(wx, wz, h, d, out){
+  const emenda = (Math.abs(fr(wx * 0.3333) - 0.5) > 0.47 ? 0.66 : 1.0) *
+                 (Math.abs(fr(wz * 0.3333) - 0.5) > 0.47 ? 0.78 : 1.0);
+  const a = 0.175 * emenda *
+            (0.86 + 0.30 * hash3(Math.round(h * 4), 61, WSEED))  // tom por prédio
+          * (1 + 0.34 * (grain(wx, wz, 2.6, 17) - 0.5)
+               + 0.22 * (grain(wx, wz, 0.34, 27) - 0.5)
+               + 0.40 * (grain(wx, wz, octave(d), 19) - 0.5));
   out[0] = a; out[1] = a * 1.02; out[2] = a * 1.10;
 }
+/** topo de sebe: o canteiro da praça tem 1 ou 2 m e também se sobe nele */
+function sebe(wx, wz, d, out){
+  const g = 0.135 * (1 + 0.50 * (grain(wx, wz, 3.2, 43) - 0.5)
+                       + 0.26 * (grain(wx, wz, 0.9, 47) - 0.5)
+                       + 0.54 * (grain(wx, wz, octave(d), 49) - 0.5));
+  out[0] = g * 0.46; out[1] = g * 1.10; out[2] = g * 0.44;
+}
+
+/** qualquer superfície horizontal que a marcha do raio encontre: o chão
+    da rua, a calçada, a grama, o topo de um canteiro, a laje de um
+    prédio. `h` é a altura dela — 0 é o nível da rua.                    */
+function surfaceColor(wx, wz, h, d, out){
+  const tx = Math.floor(wx), tz = Math.floor(wz);
+  const B = blockAtTile(tx, tz);
+  const m = B ? B.mat[(tz - B.z0) * B.w + (tx - B.x0)] : MAT_ASFALTO;
+  if (h > 0.05){
+    // canteiro baixo de praça continua sendo verde lá em cima
+    if (m === MAT_VERDE && h < 4) sebe(wx, wz, d, out);
+    else laje(wx, wz, h, d, out);
+    return;
+  }
+  if (!B){                                   // caixa da rua: asfalto + faixa
+    const cxs = (wx - mAX0) < (mAX1 - wx) ? mAX0 : mAX1;
+    const czs = (wz - mAZ0) < (mAZ1 - wz) ? mAZ0 : mAZ1;
+    let mark = 0;
+    if (Math.abs(wx - cxs) < 0.16 && Math.abs(wx - cxs) < HALF_ST && fr(wz * 0.22) < 0.5) mark = 1;
+    if (Math.abs(wz - czs) < 0.16 && Math.abs(wz - czs) < HALF_ST && fr(wx * 0.22) < 0.5) mark = 1;
+    asfalto(wx, wz, d, mark, out);
+    return;
+  }
+  if (m === MAT_ASFALTO) asfalto(wx, wz, d, 0, out);   // ramal da rua sem saída
+  else if (m === MAT_VERDE) grama(wx, wz, d, out);
+  else calcada(wx, wz, d, out);
+}
+
+const gcol = [0, 0, 0];
+let luzX = 1e9, luzZ = 1e9, luzR = 0, luzG = 0, luzB = 0;   // memo de luz do piso
 
 /* ---- fachada ------------------------------------------------------ */
 function facade(u, wy, lot, out){
@@ -1427,7 +1548,13 @@ function renderWorld(){
   tanH  = Math.tan(TUNE.fov / 2);
   projH = (COLS / 2) / tanH;
   projV = projH * cellW / cellH;
-  horizon = ROWS / 2 + Math.tan(cam.pitch) * projV;
+  octK = COLS / (2 * tanH * 2.2);      // ~2 caracteres por célula de grão
+  buildTone();
+  horizon = ROWS / 2 + cam.pitch * projV;
+  for (let y = 0; y < ROWS; y++){
+    const a = (horizon - y - 0.5) / projV;
+    rowTan[y] = Math.tan(a > ANG_MAX ? ANG_MAX : (a < -ANG_MAX ? -ANG_MAX : a));
+  }
 
   const fogR = ENV.fog[0], fogG = ENV.fog[1], fogB = ENV.fog[2];
   cellChar.fill(0);
@@ -1461,7 +1588,7 @@ function renderWorld(){
         hDist[nHit] = dist; hHigh[nHit] = h; hSide[nHit] = side;
         hMapX[nHit] = mapX; hMapZ[nHit] = mapZ;
         nHit++;
-        const top = horizon - (h - eye) * projV / dist;
+        const top = rowAt(h - eye, dist);
         if (top <= 0) break;                     // cobre o topo: nada atrás aparece
       }
       prevH = h;
@@ -1481,23 +1608,35 @@ function renderWorld(){
     for (let k = 0; k <= nStep && yFill >= 0; k++){
       const h = stepH[k];
       if (h >= eye) break;
-      const dNear = k === 0 ? 0.02 : stepD[k];
-      const dFar  = k < nStep ? stepD[k + 1] : TUNE.dist;
-      if (dFar <= dNear) continue;
+      const dFar = k < nStep ? stepD[k + 1] : TUNE.dist;
       const alt = eye - h;
-      const yFar = Math.max(0, Math.ceil(horizon + alt * projV / dFar));
-      let yNear = Math.min(yFill, Math.floor(horizon + alt * projV / dNear));
-      if (yNear >= ROWS) yNear = ROWS - 1;
-      for (let y = yNear; y >= yFar; y--){
-        const denom = y + 0.5 - horizon;
-        if (denom <= 0.001) continue;
-        const d = alt * projV / denom;
+      /* Em vez de resolver a linha inicial e a final (o que custaria dois
+         arco-tangentes por passo), anda com a própria marca-d'água: cada
+         linha sabe a sua tangente, então a distância sai direto, e a linha
+         só deixa de ser deste tile quando passa da saída dele. Assim cada
+         linha da coluna é visitada uma vez só na marcha inteira.        */
+      let y = yFill;
+      luzX = 1e9; luzZ = 1e9;                    // memo de luz, um por tile
+      for (; y >= 0; y--){
+        const tg = -rowTan[y];
+        if (tg <= 1e-6){ y = -1; break; }          // desta linha para cima é céu
+        const d = alt / tg;
+        if (d > dFar) break;                       // já é o próximo tile
         const idx = y * COLS + cx;
         if (d > TUNE.dist){ cellChar[idx] = 0; continue; }
         const wx = px + rdx * d, wz = pz + rdz * d;
-        if (h > 0) roofColor(wx, wz, h, gcol);
-        else       groundColor(wx, wz, gcol);
-        shade(wx, h + 0.02, wz, 0, 1, 0);
+        surfaceColor(wx, wz, h, d, gcol);
+        /* a luz varia em metros, a linha anda em centímetros: perto do
+           observador dezenas de linhas caem dentro do mesmo palmo de
+           chão, e refazer a varredura de luzes em cada uma é o maior
+           custo do quadro em resolução alta. Refaz só quando o ponto
+           andou de verdade. */
+        const mdx = wx - luzX, mdz = wz - luzZ;
+        if (mdx * mdx + mdz * mdz > 0.12){
+          luzX = wx; luzZ = wz;
+          shade(wx, h + 0.02, wz, 0, 1, 0);
+          luzR = sR; luzG = sG; luzB = sB;
+        } else { sR = luzR; sG = luzG; sB = luzB; }
         if (ENV.wet > 0.01){                     // molhado: escuro e espelhado
           const dry = 1 - 0.45 * ENV.wet, shine = 1 + 1.6 * ENV.wet;
           gcol[0] *= dry; gcol[1] *= dry; gcol[2] *= dry;
@@ -1511,15 +1650,16 @@ function renderWorld(){
           (gcol[1] * sG) * (1 - fg) + fogG * fg,
           (gcol[2] * sB) * (1 - fg) + fogB * fg);
       }
-      if (yFar - 1 < yFill) yFill = yFar - 1;
+      yFill = y;
+      if (yFill < 0) break;
     }
 
     /* --- paredes, do fundo para a frente --- */
     let topCovered = ROWS;
     for (let n = nHit - 1; n >= 0; n--){
       const d = hDist[n], h = hHigh[n];
-      let y0 = Math.floor(horizon - (h - eye) * projV / d);
-      let y1 = Math.ceil(horizon + eye * projV / d);
+      let y0 = Math.floor(rowAt(h - eye, d));
+      let y1 = Math.ceil(rowAt(-eye, d));
       if (y1 < 0 || y0 >= ROWS) continue;
       if (y0 < topCovered) topCovered = Math.max(0, y0);
       if (y0 < 0) y0 = 0;
@@ -1566,7 +1706,7 @@ function renderWorld(){
 
       const fog = 1 - Math.exp(-(d / TUNE.dist) * (d / TUNE.dist) * 2.4);
       for (let y = y0; y < y1; y++){
-        const wy = eye + (horizon - y - 0.5) * d / projV;
+        const wy = eye + rowTan[y] * d;
         if (wy < 0) continue;
         const idx = y * COLS + cx;
         cellDep[idx] = d;
@@ -1681,11 +1821,11 @@ function drawLamp(L){
   const sid = nextSpriteId();
   const t = p.t;
   const fog = 1 - Math.exp(-(t / TUNE.dist) * (t / TUNE.dist) * 2.4);
-  const yBase = horizon + cam.eye * projV / t;
-  const yTop  = horizon - (L.h - cam.eye) * projV / t;
+  const yBase = rowAt(-cam.eye, t);
+  const yTop  = rowAt(L.h - cam.eye, t);
   const halfPole = Math.max(0.5, (0.085 / t / tanH) * (COLS / 2));
   const halfHead = Math.max(0.6, (0.30 / t / tanH) * (COLS / 2));
-  const headTop = horizon - (L.h + 0.55 - cam.eye) * projV / t;
+  const headTop = rowAt(L.h + 0.55 - cam.eye, t);
 
   // haste
   shade(L.x, L.h * 0.5, L.z, 0, 0.2, 1);
@@ -1720,10 +1860,10 @@ function drawTree(T){
   if (t < 0.9) return;
   const sid = nextSpriteId();
   const fog = 1 - Math.exp(-(t / TUNE.dist) * (t / TUNE.dist) * 2.4);
-  const yBase = horizon + cam.eye * projV / t;
+  const yBase = rowAt(-cam.eye, t);
 
   /* tronco */
-  const trunkTop = horizon - (T.h * 0.44 - cam.eye) * projV / t;
+  const trunkTop = rowAt(T.h * 0.44 - cam.eye, t);
   const halfTrunk = Math.max(0.5, (0.13 / t / tanH) * (COLS / 2));
   shade(T.x, T.h * 0.25, T.z, 0, 0.3, 1);
   const tr = 0.20 * sR, tg = 0.16 * sG, tb = 0.13 * sB;
@@ -1744,7 +1884,7 @@ function drawTree(T){
   const cyw = T.h * 0.74;
   const halfC = (RX / t / tanH) * (COLS / 2);
   const halfR = RY * projV / t;
-  const yc = horizon - (cyw - cam.eye) * projV / t;
+  const yc = rowAt(cyw - cam.eye, t);
   shade(T.x, cyw, T.z, 0, 1, 0);
   const lr = 0.34 * sR + 0.010, lg = 0.50 * sG + 0.014, lb = 0.26 * sB + 0.008;
 
@@ -1880,8 +2020,8 @@ function drawArtSprite(wx, wz, yBase, ww, wh, art, r, g, b, flip){
   const t = p.t;
   const half = (ww * 0.5 / t / tanH) * (COLS / 2);
   if (half < 0.35) return;
-  const yTop = horizon - (yBase + wh - cam.eye) * projV / t;
-  const yBot = horizon - (yBase - cam.eye) * projV / t;
+  const yTop = rowAt(yBase + wh - cam.eye, t);
+  const yBot = rowAt(yBase - cam.eye, t);
   if (yBot < 0 || yTop >= ROWS) return;
   const rows = yBot - yTop;
   if (rows < 0.6) return;
@@ -2072,7 +2212,7 @@ function drawGlyphMark(x, y, z, ch, r, g, b){
   if (!p) return;
   const cx = Math.round(p.col);
   if (cx < 0 || cx >= COLS || p.t >= zbuf[cx]) return;
-  const row = Math.round(horizon - (y - cam.eye) * projV / p.t);
+  const row = Math.round(rowAt(y - cam.eye, p.t));
   if (row < 0 || row >= ROWS) return;
   const i = row * COLS + cx;
   cellDep[i] = p.t; cellId[i] = nextSpriteId();
@@ -2137,7 +2277,7 @@ function drawBeacon(bc){
   if (!p) return;
   const on = ((TIME * 0.85 + bc.seed * 0.013) % 1) < 0.42;
   const t = p.t;
-  const y = Math.round(horizon - (bc.y - cam.eye) * projV / t);
+  const y = Math.round(rowAt(bc.y - cam.eye, t));
   const cx = Math.round(p.col);
   if (cx < 0 || cx >= COLS || y < 0 || y >= ROWS || t >= zbuf[cx]) return;
   const i = y * COLS + cx;
@@ -2325,7 +2465,7 @@ function update(dt){
 /* 9. entrada                                                          */
 /* ------------------------------------------------------------------ */
 
-let cellIdx = 2, charsetIdx = 1;
+let cellIdx = 4, charsetIdx = 1;      // 8x14 px
 let showMinimap = true, showStats = false;
 let hasPlayed = false;
 
@@ -2353,7 +2493,7 @@ function gridFromEvent(e){
 document.addEventListener("mousemove", (e) => {
   if (locked){
     cam.yaw += e.movementX * 0.0022;
-    cam.pitch = clamp(cam.pitch - e.movementY * 0.0020, -0.85, 0.85);
+    cam.pitch = clamp(cam.pitch - e.movementY * 0.0020, -PITCH_MAX, PITCH_MAX);
     if (cam.yaw >  Math.PI) cam.yaw -= Math.PI * 2;
     if (cam.yaw < -Math.PI) cam.yaw += Math.PI * 2;
   } else gridFromEvent(e);
@@ -2425,8 +2565,8 @@ function toggleSkate(){
 function resize(){
   [cellW, cellH] = CELL_SIZES[cellIdx];
   const cw = Math.max(320, window.innerWidth), ch = Math.max(240, window.innerHeight);
-  COLS = clamp(Math.floor(cw / cellW), 40, 260);
-  ROWS = clamp(Math.floor(ch / cellH), 20, 150);
+  COLS = clamp(Math.floor(cw / cellW), 40, 460);
+  ROWS = clamp(Math.floor(ch / cellH), 20, 260);
   SW = COLS * cellW; SH = ROWS * cellH;
 
   canvas.width = SW; canvas.height = SH;
@@ -2439,6 +2579,7 @@ function resize(){
   cellDep  = new Float32Array(COLS * ROWS);
   cellId   = new Uint16Array(COLS * ROWS);
   cellPin  = new Uint8Array(COLS * ROWS);
+  rowTan = new Float64Array(ROWS);
   zbuf = new Float64Array(COLS);
   rdxs = new Float64Array(COLS);
   rdzs = new Float64Array(COLS);
@@ -2621,7 +2762,7 @@ function drawMenu(){
   items.push(y => { if (uiToggle(cx0, y, cw, "contornos", edgesOn)) edgesOn = !edgesOn; });
   items.push(y => { if (uiToggle(cx0, y, cw, "luz dinamica", lightsOn)) lightsOn = !lightsOn; });
   items.push(y => {
-    const d = uiCycle(cx0, y, cw, "caractere", cellW + "x" + cellH + " px");
+    const d = uiCycle(cx0, y, cw, "resolucao", COLS + "x" + ROWS);
     if (d) setCell(cellIdx + d);
   });
   items.push(y => {
