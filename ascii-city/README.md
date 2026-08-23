@@ -15,22 +15,44 @@ autocontido). Se preferir servir por HTTP:
 cd ascii-city && python3 -m http.server 8000   # http://localhost:8000
 ```
 
-## Controles
+## A interface é o próprio jogo
+
+![menu](docs/menu.png)
+
+Não existe uma única borda, régua ou caixa de CSS no projeto. **O menu é
+escrito nas mesmas células que o raycaster acabou de pintar** — molduras com
+`+`, `-` e `|`, botões `[ ASSIM ]`, chaves `[ SIM ] / [ NAO ]`, seletores
+`<  dense  >` e barras `[####--------]` — e o mouse é testado em coordenada de
+célula, não em pixel. É uma TUI de terminal desenhada pelo mesmo blitter que
+desenha a cidade, e a cidade continua rodando atrás dela.
+
+Enquanto se joga **não há HUD nenhum**: a tela é só a cidade. `ESC` solta o
+cursor e abre o menu; clicar em `[ RETOMAR ]` ou em qualquer ponto fora dos
+painéis volta ao jogo.
+
+Tudo que antes era atalho de teclado agora também é clicável e ajustável — os
+atalhos continuam valendo como caminho rápido:
 
 | Tecla | Ação |
 |---|---|
 | `W` `A` `S` `D` | andar |
-| mouse | olhar (clique para capturar o cursor, `ESC` solta) |
+| mouse | olhar |
 | `SHIFT` | correr |
 | `K` | pegar / largar o skate |
-| `C` | cor ↔ mono | 
-| `L` | liga/desliga a iluminação dinâmica |
-| `E` | liga/desliga os contornos |
-| `M` | minimapa · `H` HUD · `F` tela cheia |
+| `ESC` | abre o menu |
+| `C` | cor ↔ mono |
+| `L` | luz dinâmica · `E` contornos · `M` minimapa |
 | `[` `]` | tamanho do caractere (6×10 até 14×25 px) |
 | `1` `2` `3` `4` | conjunto de caracteres |
-| `G` | gera outro mundo · `R` respawn |
+| `G` | outro mundo · `R` respawn · `F` tela cheia |
 | `,` `.` | exposição · `;` `'` nível de preto |
+
+Os widgets são de modo imediato: cada um se desenha e, no mesmo passo, testa se
+o mouse está em cima e se houve clique. Trocar o tamanho da célula realoca os
+buffers, então o `resize` é adiado para depois do `blit` — senão o menu
+terminaria de se desenhar em cima de um buffer que já não existe.
+
+![pausa](docs/pause.png)
 
 ## Nada de 3D por baixo
 
@@ -88,8 +110,6 @@ pré-multiplicada num `Uint32Array` — sem `fillText` por célula, sem GPU.
 
 Infinita nos quatro sentidos, determinística, e nada é guardado além dos
 quarteirões próximos (o cache segura ~220 e descarta os mais antigos).
-
-![minimapa e HUD](docs/hud.png)
 
 ### O traçado
 

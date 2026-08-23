@@ -5,62 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>ASCII CITY — protótipo 3D</title>
 <style>
-  :root{ --ink:#7dffc4; --dim:#2f6b55; --bg:#04070a; }
+  /* A interface toda é desenhada dentro da grade de caracteres pelo próprio
+     motor do jogo — aqui não existe nenhuma borda, régua ou caixa de CSS.
+     Esta folha só cuida de deixar o canvas centrado num fundo preto. */
   *{box-sizing:border-box}
   html,body{
-    margin:0;padding:0;height:100%;width:100%;
-    background:var(--bg);color:var(--ink);
-    font-family:"Courier New",ui-monospace,Menlo,Consolas,monospace;
-    overflow:hidden;
+    margin:0;padding:0;height:100%;width:100%;background:#000;color:#7dffc4;
+    font-family:"Courier New",ui-monospace,Menlo,Consolas,monospace;overflow:hidden;
   }
-  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg)}
-  canvas{display:block;image-rendering:pixelated;background:#000}
-  .overlay{position:fixed;pointer-events:none;user-select:none}
-  #hud{top:0;left:0;right:0;bottom:0;font-size:12px;line-height:1.45;
-       text-shadow:0 0 6px rgba(125,255,196,.35)}
-  #hud .panel{position:absolute;padding:8px 10px;border:1px solid var(--dim);
-              background:rgba(4,7,10,.72);white-space:pre}
-  #stats{top:10px;left:10px}
-  #help{top:10px;right:10px}
-  #map{bottom:10px;left:10px;line-height:1.0;font-size:11px;letter-spacing:1px}
-  #crosshair{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;opacity:.5}
-  .k{color:#ffe066}
-  .muted{color:var(--dim)}
-  #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
-         justify-content:center;gap:18px;background:radial-gradient(ellipse at center,
-         rgba(8,16,20,.86), rgba(2,4,6,.97));cursor:pointer;z-index:10;text-align:center;padding:20px}
-  #start pre{margin:0;font-size:clamp(6px,1.35vw,15px);line-height:1.05;color:var(--ink);
-             text-shadow:0 0 12px rgba(125,255,196,.45)}
-  #start .sub{font-size:13px;color:#9fe8ff;letter-spacing:.18em}
-  #start .cta{font-size:15px;border:1px solid var(--ink);padding:10px 18px;
-              animation:blink 1.15s steps(2,start) infinite}
-  #start .keys{font-size:12px;color:var(--dim);line-height:1.7}
-  @keyframes blink{50%{opacity:.25}}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
+  canvas{display:block;image-rendering:pixelated;background:#000;cursor:default}
+  canvas.playing{cursor:none}
   #err{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
-       padding:30px;background:#04070a;color:#ff7d7d;font-size:14px;white-space:pre-wrap;text-align:center}
+       padding:30px;background:#000;color:#ff7d7d;font-size:14px;white-space:pre-wrap;text-align:center}
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="screen"></canvas></div>
-
-<div id="hud" class="overlay">
-  <div class="panel" id="stats"></div>
-  <div class="panel" id="help"></div>
-  <div class="panel" id="map"></div>
-  <div id="crosshair" class="overlay">+</div>
-</div>
-
-<div id="start">
-  <pre id="title"></pre>
-  <div class="sub">PROTOTYPE 02 — RAYCASTER ASCII, CIDADE INFINITA</div>
-  <div class="cta">CLIQUE PARA ENTRAR NA CIDADE</div>
-  <div class="keys">
-    WASD mover · MOUSE olhar · SHIFT correr · ESC liberar cursor<br>
-    K pegar o skate · C cor · L luz dinâmica · E contornos<br>
-    [ ] tamanho do caractere · 1..4 charset · G outro mundo · M mapa · H hud
-  </div>
-</div>
-
 <div id="err"></div>
 
 <script>
@@ -1312,59 +1273,71 @@ function update(dt){
 }
 
 /* ------------------------------------------------------------------ */
-/* 9. controles, tela e HUD                                            */
+/* 9. entrada                                                          */
 /* ------------------------------------------------------------------ */
 
-const startEl = document.getElementById("start");
-let cellIdx = 2, charsetIdx = 1, showHud = true, showMap = true;
+let cellIdx = 2, charsetIdx = 1;
+let showMinimap = true, showStats = false;
+let hasPlayed = false;
+
+/* posição do mouse já convertida para célula da grade */
+let mouseGX = -1, mouseGY = -1, mouseDown = false, mouseClick = false;
+let fps = 60, frameMs = 0;
 
 function requestLock(){
   const pr = canvas.requestPointerLock({ unadjustedMovement: true });
-  if (pr && typeof pr.catch === "function") pr.catch(() => canvas.requestPointerLock());
+  if (pr && typeof pr.catch === "function") pr.catch(() => { try { canvas.requestPointerLock(); } catch (e) {} });
 }
-startEl.addEventListener("click", () => requestLock());
-canvas.addEventListener("click", () => { if (!locked) requestLock(); });
+
 document.addEventListener("pointerlockchange", () => {
   locked = document.pointerLockElement === canvas;
-  startEl.style.display = locked ? "none" : "flex";
-  if (!locked){ keys.clear(); player.vx = player.vz = 0; }
+  canvas.classList.toggle("playing", locked);
+  if (locked) hasPlayed = true;
+  else { keys.clear(); player.vx = player.vz = 0; }
 });
+
+function gridFromEvent(e){
+  const r = canvas.getBoundingClientRect();
+  mouseGX = Math.floor((e.clientX - r.left) / (r.width  / COLS));
+  mouseGY = Math.floor((e.clientY - r.top)  / (r.height / ROWS));
+}
 document.addEventListener("mousemove", (e) => {
-  if (!locked) return;
-  cam.yaw += e.movementX * 0.0022;
-  cam.pitch = clamp(cam.pitch - e.movementY * 0.0020, -0.85, 0.85);
-  if (cam.yaw >  Math.PI) cam.yaw -= Math.PI * 2;
-  if (cam.yaw < -Math.PI) cam.yaw += Math.PI * 2;
+  if (locked){
+    cam.yaw += e.movementX * 0.0022;
+    cam.pitch = clamp(cam.pitch - e.movementY * 0.0020, -0.85, 0.85);
+    if (cam.yaw >  Math.PI) cam.yaw -= Math.PI * 2;
+    if (cam.yaw < -Math.PI) cam.yaw += Math.PI * 2;
+  } else gridFromEvent(e);
 });
+canvas.addEventListener("mousedown", (e) => {
+  if (locked) return;
+  gridFromEvent(e);
+  mouseDown = true; mouseClick = true;
+  e.preventDefault();
+});
+window.addEventListener("mouseup", () => { mouseDown = false; });
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+/* os atalhos continuam valendo — o menu é um caminho a mais, não o único */
 window.addEventListener("keydown", (e) => {
   if (e.repeat){ e.preventDefault(); return; }
   keys.add(e.code);
   switch (e.code){
+    case "Escape": if (locked) document.exitPointerLock?.(); break;
     case "KeyC": colorMode = !colorMode; break;
     case "KeyL": lightsOn = !lightsOn; break;
     case "KeyE": edgesOn = !edgesOn; break;
-    case "KeyM": showMap = !showMap; document.getElementById("map").style.display = showMap ? "" : "none"; break;
-    case "KeyH": showHud = !showHud; document.getElementById("hud").style.display = showHud ? "" : "none"; break;
-    case "KeyK":
-      RIDE.on = !RIDE.on;
-      if (RIDE.on) RIDE.push = 0;
-      else {                                     // ao descer, perde o excedente
-        const sp = Math.hypot(player.vx, player.vz);
-        if (sp > SPEEDS.run){ const f = SPEEDS.run / sp; player.vx *= f; player.vz *= f; }
-      }
-      break;
+    case "KeyM": showMinimap = !showMinimap; break;
     case "KeyR": respawn(); break;
-    case "KeyG": WSEED = (Math.random() * 1e9) | 0; resetCity(); memoReset(); respawn(); break;
-    case "KeyF":
-      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-      else document.exitFullscreen?.();
-      break;
-    case "BracketLeft":  cellIdx = clamp(cellIdx - 1, 0, CELL_SIZES.length - 1); resize(); break;
-    case "BracketRight": cellIdx = clamp(cellIdx + 1, 0, CELL_SIZES.length - 1); resize(); break;
-    case "Comma":     TUNE.exposure = clamp(TUNE.exposure - 0.4, 0.6, 30); break;
-    case "Period":    TUNE.exposure = clamp(TUNE.exposure + 0.4, 0.6, 30); break;
-    case "Semicolon": TUNE.black = clamp(TUNE.black - 0.004, 0, 0.25); break;
-    case "Quote":     TUNE.black = clamp(TUNE.black + 0.004, 0, 0.25); break;
+    case "KeyK": toggleSkate(); break;
+    case "KeyG": newWorld(); break;
+    case "KeyF": toggleFullscreen(); break;
+    case "BracketLeft":  setCell(cellIdx - 1); break;
+    case "BracketRight": setCell(cellIdx + 1); break;
+    case "Comma":     TUNE.exposure = clamp(TUNE.exposure - 0.4, 0.6, 20); break;
+    case "Period":    TUNE.exposure = clamp(TUNE.exposure + 0.4, 0.6, 20); break;
+    case "Semicolon": TUNE.black = clamp(TUNE.black - 0.004, 0, 0.12); break;
+    case "Quote":     TUNE.black = clamp(TUNE.black + 0.004, 0, 0.12); break;
     case "Digit1": case "Digit2": case "Digit3": case "Digit4":
       charsetIdx = clamp(parseInt(e.code.slice(5), 10) - 1, 0, CHARSETS.length - 1);
       setCharset(charsetIdx);
@@ -1374,6 +1347,30 @@ window.addEventListener("keydown", (e) => {
 });
 window.addEventListener("keyup", (e) => keys.delete(e.code));
 window.addEventListener("blur", () => keys.clear());
+
+/* ações compartilhadas entre o teclado e os botões do menu */
+let pendingResize = false;
+function setCell(i){
+  const v = clamp(i, 0, CELL_SIZES.length - 1);
+  if (v !== cellIdx){ cellIdx = v; pendingResize = true; }
+}
+function setCharsetIdx(i){
+  charsetIdx = (i + CHARSETS.length) % CHARSETS.length;
+  setCharset(charsetIdx);
+}
+function newWorld(){ WSEED = (Math.random() * 1e9) | 0; resetCity(); memoReset(); respawn(); }
+function toggleFullscreen(){
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+  else document.exitFullscreen?.();
+}
+function toggleSkate(){
+  RIDE.on = !RIDE.on;
+  if (RIDE.on) RIDE.push = 0;
+  else {
+    const sp = Math.hypot(player.vx, player.vz);
+    if (sp > SPEEDS.run){ const f = SPEEDS.run / sp; player.vx *= f; player.vz *= f; }
+  }
+}
 
 function resize(){
   [cellW, cellH] = CELL_SIZES[cellIdx];
@@ -1400,74 +1397,249 @@ function resize(){
 }
 window.addEventListener("resize", resize);
 
-/* ---- HUD ---------------------------------------------------------- */
-const statsEl = document.getElementById("stats");
-const helpEl  = document.getElementById("help");
-const mapEl   = document.getElementById("map");
-let fps = 60, hudT = 0, mapT = 0, frameMs = 0;
+/* ------------------------------------------------------------------ */
+/* 10. interface — desenhada na própria grade de caracteres            */
+/* ------------------------------------------------------------------ */
+/*  Não há uma única borda de CSS no jogo: os painéis são escritos com
+    '+', '-' e '|' nas mesmas células que o raycaster acabou de pintar,
+    e o mouse é testado em coordenada de célula. É uma TUI de terminal
+    desenhada pelo mesmo blitter que desenha a cidade.                 */
 
-helpEl.innerHTML =
-  `<span class="k">WASD</span> mover   <span class="k">MOUSE</span> olhar   <span class="k">SHIFT</span> correr\n` +
-  `<span class="k">C</span> cor        <span class="k">L</span> luz dinâmica  <span class="k">E</span> contornos\n` +
-  `<span class="k">M</span> mapa       <span class="k">H</span> hud\n` +
-  `<span class="k">[ ]</span> célula   <span class="k">1-4</span> charset     <span class="k">F</span> tela cheia\n` +
-  `<span class="k">K</span> skate      <span class="k">G</span> outro mundo  <span class="k">R</span> respawn\n` +
-  `<span class="k">, .</span> exposição <span class="k">; '</span> preto   <span class="k">ESC</span> solta o cursor`;
+const UI = { fg: 0x9ff5c8, dim: 0x2f6b55, hi: 0xffe066, acc: 0x66d9ff, off: 0x4a6b62,
+             map0: 0x17302a, map1: 0x24483d, map2: 0x336655, map3: 0x4a8a72 };
+const VALW = 20;                     // largura da coluna de valores
+let panelHit = false;                // o clique caiu dentro de algum painel?
 
-function updateHud(){
-  const i = idxX(cam.x), j = idxZ(cam.z);
-  statsEl.innerHTML =
-    `ASCII CITY // prototype 02\n` +
-    `<span class="muted">fps    </span>${fps.toFixed(0).padStart(3)}  ` +
-    `<span class="muted">frame </span>${frameMs.toFixed(1)}ms\n` +
-    `<span class="muted">grade  </span>${COLS}x${ROWS} @${cellW}x${cellH}px  ` +
-    `<span class="muted">= </span>${(COLS * ROWS).toLocaleString("pt-BR")} chars\n` +
-    `<span class="muted">pos    </span>${cam.x.toFixed(1)}, ${cam.z.toFixed(1)}  ` +
-    `<span class="muted">quart.</span> ${i},${j}\n` +
-    `<span class="muted">set    </span>${CHARSETS[charsetIdx].name}  ` +
-    `<span class="muted">luz </span>${lightsOn ? "on" : "off"}  ` +
-    `<span class="muted">cor </span>${colorMode ? "on" : "off"}  ` +
-    `<span class="muted">bordas </span>${edgesOn ? "on" : "off"}\n` +
-    `<span class="muted">blocos </span>${blockCache.size} em cache  ` +
-    `<span class="muted">seed </span>${WSEED}\n` +
-    `<span class="muted">modo   </span>${RIDE.on ? "SKATE" : "a pé"}  ` +
-    `<span class="muted">vel </span>${(Math.hypot(player.vx, player.vz) * 3.6).toFixed(0).padStart(2)} km/h  ` +
-    `<span class="muted">painéis </span>${signLights.length}`;
+function uiCell(x, y, glyph, col){
+  if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
+  const i = y * COLS + x;
+  cellChar[i] = glyph; cellCol[i] = col;
 }
-
-/* minimapa: amostra a própria malha do mundo, então mostra a cidade real */
-const MAP_N = 25, MAP_STEP = 3;
-function updateMap(){
-  const cxp = Math.floor(cam.x), czp = Math.floor(cam.z);
-  const dirI = Math.round(Math.sin(cam.yaw)), dirJ = Math.round(-Math.cos(cam.yaw));
-  let out = "";
-  for (let j = -MAP_N >> 1; j <= MAP_N >> 1; j++){
-    for (let i = -MAP_N >> 1; i <= MAP_N >> 1; i++){
-      if (i === 0 && j === 0){ out += "@"; continue; }
-      if (i === dirI && j === dirJ){ out += "^"; continue; }
-      const h = heightAtTile(cxp + i * MAP_STEP, czp + j * MAP_STEP);
-      out += h === 0 ? "·" : (h < 12 ? "▒" : (h < 30 ? "▓" : "█"));
+function uiText(x, y, s, col){
+  for (let k = 0; k < s.length; k++) uiCell(x + k, y, ci(s[k]), col);
+}
+function uiCenter(x, y, w, s, col){ uiText(x + Math.max(0, (w - s.length) >> 1), y, s, col); }
+function uiClear(x, y, w, h){
+  for (let j = 0; j < h; j++){
+    const yy = y + j; if (yy < 0 || yy >= ROWS) continue;
+    for (let i = 0; i < w; i++){
+      const xx = x + i; if (xx < 0 || xx >= COLS) continue;
+      cellChar[yy * COLS + xx] = 0;
     }
-    out += "\n";
   }
-  mapEl.textContent = out;
+}
+/** moldura de terminal: cantos em '+', laterais em '|', topo em '-' */
+function uiFrame(x, y, w, h, title){
+  uiClear(x, y, w, h);
+  const bar = "+" + "-".repeat(Math.max(0, w - 2)) + "+";
+  uiText(x, y, bar, UI.dim);
+  uiText(x, y + h - 1, bar, UI.dim);
+  for (let j = 1; j < h - 1; j++){
+    uiCell(x, y + j, ci("|"), UI.dim);
+    uiCell(x + w - 1, y + j, ci("|"), UI.dim);
+  }
+  if (title) uiText(x + 3, y, "[ " + title + " ]", UI.fg);
+}
+function uiRule(x, y, w, label){
+  uiText(x, y, "-".repeat(w), UI.dim);
+  if (label) uiText(x + 1, y, " " + label + " ", UI.acc);
+}
+function uiIn(x, y, w, h){
+  return mouseGX >= x && mouseGX < x + w && mouseGY >= y && mouseGY < y + h;
 }
 
-/* banner do menu, montado a partir de uma fonte 5x5 */
-(function banner(){
+/** linha "rótulo ....... valor", com o cursor '>' quando o mouse está nela */
+function uiRow(x, y, w, label, value, over, valCol){
+  const vx = x + w - VALW;
+  uiText(x, y, label, over ? UI.hi : UI.fg);
+  const d0 = x + label.length + 1, dots = vx - d0 - 1;
+  if (dots > 0) uiText(d0, y, ".".repeat(dots), UI.dim);
+  uiText(vx, y, value, valCol);
+  uiCell(x - 2, y, over ? ci(">") : 0, UI.hi);
+  return vx;
+}
+function uiToggle(x, y, w, label, value){
+  const over = uiIn(x - 2, y, w + 2, 1);
+  uiRow(x, y, w, label, value ? "[ SIM ]" : "[ NAO ]", over, value ? UI.fg : UI.off);
+  if (over && mouseClick){ mouseClick = false; return true; }
+  return false;
+}
+/** devolve -1, 0 ou +1 conforme o lado clicado */
+function uiCycle(x, y, w, label, valueStr){
+  const over = uiIn(x - 2, y, w + 2, 1);
+  const body = valueStr.length > 11 ? valueStr.slice(0, 11) : valueStr;
+  const pad = 11 - body.length, l = pad >> 1;
+  const vx = uiRow(x, y, w, label, "<" + " ".repeat(l) + body + " ".repeat(pad - l) + ">", over, UI.fg);
+  if (over){
+    const left = mouseGX < vx + 6;
+    uiCell(vx, y, ci("<"), left ? UI.hi : UI.dim);
+    uiCell(vx + 12, y, ci(">"), left ? UI.dim : UI.hi);
+    if (mouseClick){ mouseClick = false; return left ? -1 : 1; }
+  }
+  return 0;
+}
+/** barra clicável e arrastável */
+function uiSlider(x, y, w, label, v, min, max, txt){
+  const BARS = 12;
+  const vx = x + w - VALW;
+  const over = uiIn(vx, y, BARS + 2, 1);
+  const t = clamp((v - min) / (max - min), 0, 1);
+  const n = Math.round(t * BARS);
+  uiRow(x, y, w, label, "[" + "#".repeat(n) + "-".repeat(BARS - n) + "] " + txt,
+        uiIn(x - 2, y, w + 2, 1), over ? UI.hi : UI.fg);
+  if (over && mouseDown){
+    const t2 = clamp((mouseGX - vx) / BARS, 0, 1);
+    return min + t2 * (max - min);
+  }
+  return v;
+}
+function btnW(label){ return label.length + 4; }
+function uiButton(x, y, label, primary, forceCol){
+  const s = "[ " + label + " ]";
+  const over = uiIn(x, y, s.length, 1);
+  uiText(x, y, s, over ? UI.hi : (forceCol || (primary ? UI.fg : UI.dim)));
+  if (over && mouseClick){ mouseClick = false; return true; }
+  return false;
+}
+
+/* letreiro do título, montado com uma fonte 5x5 de um caractere por pixel */
+const BANNER = (() => {
   const F = {
     A:[".##.","#..#","####","#..#","#..#"], S:[".###","#...",".##.","...#","###."],
     C:[".###","#...","#...","#...",".###"], I:["###",".#.",".#.",".#.","###"],
     T:["#####","..#..","..#..","..#..","..#.."], Y:["#...#",".#.#.","..#..","..#..","..#.."],
     " ":["  ","  ","  ","  ","  "]
   };
-  const rows = ["","","","",""];
+  const rows = ["", "", "", "", ""];
   for (const ch of "ASCII CITY"){
     const g = F[ch];
-    for (let r = 0; r < 5; r++) rows[r] += g[r].replace(/#/g, "██").replace(/\./g, "  ") + " ";
+    for (let r = 0; r < 5; r++) rows[r] += g[r].replace(/#/g, "█").replace(/\./g, " ") + " ";
   }
-  document.getElementById("title").textContent = rows.join("\n");
+  return rows;
 })();
+
+/* minimapa: amostra a própria malha do mundo, então é a cidade de verdade */
+function drawMinimap(x, y, n){
+  uiFrame(x, y, n + 4, n + 2, "MAPA");
+  const step = 3;
+  const cxp = Math.floor(cam.x), czp = Math.floor(cam.z);
+  const h = n >> 1;
+  const dirI = Math.round(Math.sin(cam.yaw)), dirJ = Math.round(-Math.cos(cam.yaw));
+  for (let j = -h; j <= h; j++){
+    for (let i = -h; i <= h; i++){
+      const px2 = x + 2 + (i + h), py2 = y + 1 + (j + h);
+      if (i === 0 && j === 0){ uiCell(px2, py2, ci("@"), UI.hi); continue; }
+      if (i === dirI && j === dirJ){ uiCell(px2, py2, ci("^"), UI.acc); continue; }
+      const ht = heightAtTile(cxp + i * step, czp + j * step);
+      if (ht === 0) uiCell(px2, py2, ci("."), UI.map0);
+      else if (ht < 12) uiCell(px2, py2, ci("░"), UI.map1);
+      else if (ht < 30) uiCell(px2, py2, ci("▒"), UI.map2);
+      else uiCell(px2, py2, ci("▓"), UI.map3);
+    }
+  }
+  return { x, y, w: n + 4, h: n + 2 };
+}
+
+/* ---- o menu ------------------------------------------------------- */
+function drawMenu(){
+  panelHit = false;
+  const PW = clamp(COLS - 6, 34, 58);
+  const px = (COLS - PW) >> 1;
+  const cx0 = px + 3, cw = PW - 6;
+  const wide = ROWS >= 34, tall = ROWS >= 30;
+
+  const items = [];
+  const nop = () => {};
+  if (wide){
+    for (let r = 0; r < 5; r++){ const rr = r; items.push(y => uiCenter(px + 1, y, PW - 2, BANNER[rr], UI.fg)); }
+    items.push(nop);
+  }
+  items.push(y => uiCenter(px + 1, y, PW - 2,
+    hasPlayed ? "PAUSA" : "PROTOTYPE 02  -  RAYCASTER ASCII", UI.acc));
+  items.push(nop);
+  items.push(y => {
+    const lbl = hasPlayed ? "RETOMAR" : "ENTRAR NA CIDADE";
+    const bx = px + ((PW - btnW(lbl)) >> 1);
+    const blink = (TIME * 1.6) % 1 < 0.55;
+    if (uiButton(bx, y, lbl, true, blink ? UI.hi : UI.fg)) requestLock();
+  });
+  items.push(nop);
+
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "IMAGEM"));
+  items.push(y => { if (uiToggle(cx0, y, cw, "cor", colorMode)) colorMode = !colorMode; });
+  items.push(y => { if (uiToggle(cx0, y, cw, "contornos", edgesOn)) edgesOn = !edgesOn; });
+  items.push(y => { if (uiToggle(cx0, y, cw, "luz dinamica", lightsOn)) lightsOn = !lightsOn; });
+  items.push(y => {
+    const d = uiCycle(cx0, y, cw, "caractere", cellW + "x" + cellH + " px");
+    if (d) setCell(cellIdx + d);
+  });
+  items.push(y => {
+    const d = uiCycle(cx0, y, cw, "conjunto", CHARSETS[charsetIdx].name);
+    if (d) setCharsetIdx(charsetIdx + d);
+  });
+  items.push(y => { TUNE.exposure = uiSlider(cx0, y, cw, "exposicao", TUNE.exposure, 1, 16, TUNE.exposure.toFixed(1)); });
+  items.push(y => { TUNE.black    = uiSlider(cx0, y, cw, "nivel de preto", TUNE.black, 0, 0.1, TUNE.black.toFixed(3)); });
+  items.push(nop);
+
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "MUNDO"));
+  items.push(y => { if (uiToggle(cx0, y, cw, "skate", RIDE.on)) toggleSkate(); });
+  items.push(y => { if (uiToggle(cx0, y, cw, "minimapa", showMinimap)) showMinimap = !showMinimap; });
+  items.push(y => { if (uiToggle(cx0, y, cw, "dados na tela", showStats)) showStats = !showStats; });
+  items.push(y => {
+    const a = "NOVO MUNDO", b = "RESPAWN", c = "TELA CHEIA";
+    const total = btnW(a) + btnW(b) + btnW(c) + 4;
+    let bx = px + ((PW - total) >> 1);
+    if (uiButton(bx, y, a)) newWorld();               bx += btnW(a) + 2;
+    if (uiButton(bx, y, b)) respawn();                bx += btnW(b) + 2;
+    if (uiButton(bx, y, c)) toggleFullscreen();
+  });
+
+  if (tall){
+    items.push(nop);
+    items.push(y => uiRule(cx0 - 1, y, cw + 2, "CONTROLES"));
+    items.push(y => uiText(cx0, y, "WASD andar   MOUSE olhar   SHIFT correr   K skate", UI.dim));
+    items.push(y => uiText(cx0, y, "ESC abre este menu   -   clique fora dele para voltar", UI.dim));
+  }
+  items.push(nop);
+  items.push(y => uiText(cx0, y, statsLine(), UI.dim));
+
+  const PH = Math.min(ROWS, items.length + 2);
+  const py = clamp((ROWS - PH) >> 1, 0, Math.max(0, ROWS - PH));
+  uiFrame(px, py, PW, PH, "ASCII CITY");
+  for (let i = 0; i < items.length && py + 1 + i < py + PH - 1; i++) items[i](py + 1 + i);
+  if (uiIn(px, py, PW, PH)) panelHit = true;
+
+  if (showMinimap){
+    const n = Math.min(23, ROWS - 4) | 1;
+    const mx = px + PW + 2;
+    if (n >= 9 && mx + n + 4 <= COLS){
+      const r = drawMinimap(mx, py, n);
+      if (uiIn(r.x, r.y, r.w, r.h)) panelHit = true;
+    }
+  }
+
+  // clique no vazio volta para o jogo
+  if (mouseClick && !panelHit){ mouseClick = false; requestLock(); }
+}
+
+function statsLine(){
+  return "fps " + fps.toFixed(0) + "  " + frameMs.toFixed(1) + "ms  " +
+         COLS + "x" + ROWS + "  pos " + cam.x.toFixed(0) + "," + cam.z.toFixed(0) +
+         "  seed " + WSEED;
+}
+
+/** HUD opcional, desligado por padrão: uma linha discreta no rodapé */
+function drawStats(){
+  const s = statsLine() + "   " + (RIDE.on ? "SKATE " : "a pe  ") +
+            (Math.hypot(player.vx, player.vz) * 3.6).toFixed(0) + " km/h";
+  uiText(2, ROWS - 2, s, UI.dim);
+}
+
+function drawUI(){
+  if (locked){ if (showStats) drawStats(); }
+  else drawMenu();
+  mouseClick = false;
+}
 
 /* ------------------------------------------------------------------ */
 /* 10. boot + loop                                                     */
@@ -1490,13 +1662,11 @@ function frame(now){
   renderSprites();
   drawDeck();
   if (edgesOn) edgePass();
+  drawUI();
   blit();
+  if (pendingResize){ pendingResize = false; resize(); }
   frameMs = frameMs * 0.9 + (performance.now() - t0) * 0.1;
-
   fps = lerp(fps, 1 / Math.max(dt, 1e-4), 0.08);
-  hudT += dt; mapT += dt;
-  if (showHud && hudT > 0.15){ hudT = 0; updateHud(); }
-  if (showMap && mapT > 0.25){ mapT = 0; updateMap(); }
 
   requestAnimationFrame(frame);
 }
