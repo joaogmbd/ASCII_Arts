@@ -1101,25 +1101,29 @@ let TIME = 0;
 
 let projH = 0, projV = 0, horizon = 0, tanH = 0;
 
-/* ---- projeção vertical cilíndrica ---------------------------------
-   Um raycaster clássico inclina a câmera por cisalhamento: a linha do
-   horizonte anda `tan(pitch)·projV` e o resto da conta continua linear.
-   É exato perto do centro da tela e barato, mas a tangente explode: a
-   80° para baixo a tela inteira vira meio metro de chão esticado, e por
-   isso o pitch tinha de ficar preso em ±49°.
+/* ---- projeção vertical -------------------------------------------
+   O pitch é um cisalhamento: a linha do horizonte anda `tan(pitch)·projV`
+   e o resto da conta continua linear. Isso não é uma aproximação — é a
+   perspectiva correta com o ponto principal deslocado, como uma lente
+   tilt-shift: reta do mundo continua reta na tela. O preço é que a
+   tangente cresce sem limite, então o pitch precisa parar antes de o
+   esticamento ficar absurdo.
 
-   Aqui a LINHA da tela vira um ÂNGULO em vez de um deslocamento. O eixo
-   horizontal continua plano — é ele que garante que uma coluna inteira
-   tem uma direção só, que é o que torna o DDA por coluna possível — e só
-   o vertical passa a ser cilíndrico. Perto do centro dá exatamente no
-   mesmo (tan x ≈ x para x pequeno); nos extremos passa a ser possível
-   olhar para cima e para baixo de verdade, sem singularidade.          */
+   (Chegou a existir aqui uma vertical cilíndrica, que trocava o
+   deslocamento por um ângulo e ia a ±83°. Ela não tem singularidade, mas
+   também não consegue representar o ponto a pino: perto do extremo o
+   nadir deixa de ser um ponto e vira uma linha esticada pela tela
+   inteira, e as horizontais do mundo entortam. Ficou pior do que o
+   limite que ela removia.)
+
+   Cada linha guarda a sua tangente numa tabela montada uma vez por
+   quadro, e a marcha de superfície anda por essa tabela em vez de
+   resolver a linha por conta.                                          */
 let rowTan = null;                  // tangente da elevação de cada linha
-const ANG_MAX = Math.PI / 2 - 1e-3; // além disso a linha olharia para trás
-const PITCH_MAX = 1.45;             // 83°: quase a pino, sem chegar aos 90°
+const PITCH_MAX = 0.85;             // ~49°: além disso o esticamento domina
 
 /** linha (contínua) onde cai um ponto a `dy` de altura e `d` de distância */
-function rowAt(dy, d){ return horizon - Math.atan(dy / d) * projV; }
+function rowAt(dy, d){ return horizon - (dy / d) * projV; }
 let dirX = 0, dirZ = 0, rgtX = 0, rgtZ = 0;
 let zbuf = null, rdxs = null, rdzs = null;
 
@@ -1550,11 +1554,8 @@ function renderWorld(){
   projV = projH * cellW / cellH;
   octK = COLS / (2 * tanH * 2.2);      // ~2 caracteres por célula de grão
   buildTone();
-  horizon = ROWS / 2 + cam.pitch * projV;
-  for (let y = 0; y < ROWS; y++){
-    const a = (horizon - y - 0.5) / projV;
-    rowTan[y] = Math.tan(a > ANG_MAX ? ANG_MAX : (a < -ANG_MAX ? -ANG_MAX : a));
-  }
+  horizon = ROWS / 2 + Math.tan(cam.pitch) * projV;
+  for (let y = 0; y < ROWS; y++) rowTan[y] = (horizon - y - 0.5) / projV;
 
   const fogR = ENV.fog[0], fogG = ENV.fog[1], fogB = ENV.fog[2];
   cellChar.fill(0);

@@ -157,29 +157,24 @@ praticamente não muda. E é isso que torna o telhado um lugar de verdade: subir
 num prédio de 76 m e olhar para baixo devolve 1,2 m de distância na base da
 tela, não os 56 m que a fórmula do plano único devolvia.
 
-**A vertical é cilíndrica.** Um raycaster inclina a câmera por
-cisalhamento: a linha do horizonte anda `tan(pitch)·projV` e o resto da conta
-continua linear. É exato perto do centro e custa nada, mas a tangente explode —
-a 80° para baixo a tela inteira vira meio metro de chão esticado. Por isso o
-pitch vivia preso perto de ±45°, e nesse projeto isso passou a doer: subir num
-prédio de 76 m e não poder olhar para baixo tira o sentido de ter subido.
+**A vertical é um cisalhamento.** O pitch não gira a câmera: desloca a linha
+do horizonte em `tan(pitch)·projV` e deixa o resto da conta linear. Isso não é
+uma aproximação — é a perspectiva correta com o ponto principal fora do centro,
+como uma lente tilt-shift: reta do mundo continua reta na tela. O preço é que a
+tangente cresce sem limite, então o pitch para em ±49°, antes de o esticamento
+tomar conta.
 
-Aqui a **linha** da tela é um ângulo, não um deslocamento. O eixo horizontal
-continua plano — é ele que garante que uma coluna inteira tem uma direção só,
-que é o que torna o DDA por coluna possível — e só o vertical vira cilíndrico:
+Chegou a existir aqui uma vertical **cilíndrica**, em que a linha da tela era um
+ângulo em vez de um deslocamento. Ela não tem singularidade e ia a ±83°, o que
+parecia resolver o problema de subir num prédio e não poder olhar para baixo.
+Não resolveu: uma projeção cilíndrica não consegue representar o ponto a pino.
+Perto do extremo o nadir deixa de ser um ponto e vira uma linha esticada pela
+tela inteira, e as horizontais do mundo entortam. A distorção que ela introduzia
+era pior que o limite que removia, então voltou o cisalhamento.
 
-```
-   linear (cisalhamento)          angular (cilíndrico)
-   linha = h·projV/d + horiz      linha = horiz − atan(h/d)·projV
-   horiz = ROWS/2 + tan(p)·projV  horiz = ROWS/2 + p·projV
-   ±45° usável, ±90° explode      ±83° usável, sem singularidade
-```
-
-Como `tan x ≈ x` para x pequeno, no centro da tela o resultado é o mesmo de
-antes; a diferença aparece nos extremos, que é justamente onde o outro
-quebrava. E o arco-tangente não entra no laço interno: cada linha guarda a sua
-tangente numa tabela montada uma vez por quadro, e a marcha de superfície anda
-por essa tabela em vez de resolver a linha por conta.
+O que ficou dessa passagem é a tabela: cada linha guarda a sua tangente uma vez
+por quadro, e a marcha de superfície anda por ela em vez de resolver a linha por
+conta a cada passo.
 
 **Contornos geométricos, não Sobel.** A v1 procurava bordas na imagem. Aqui não
 há imagem — há o z-buffer da própria grade de caracteres, mais um id de
@@ -457,8 +452,7 @@ na tela fora do menu.
 ![topo](docs/topo.png)
 
 `E` teleporta para a laje, 3,2 m para dentro da fachada, e o telhado é chão como
-qualquer outro: dá para andar nele, correr, andar de skate e pular — e para
-**olhar para baixo**, que é o que a projeção cilíndrica passou a permitir. De
+qualquer outro: dá para andar nele, correr, andar de skate e pular. De
 cima, com a barra de alcance aberta, a cidade vira um mar de lajes até a névoa.
 
 ![olhando para baixo](docs/olhando.png)
