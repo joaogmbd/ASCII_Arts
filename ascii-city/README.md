@@ -48,6 +48,9 @@ atalhos continuam valendo como caminho rápido:
 | `G` | outro mundo · `R` respawn · `F` tela cheia |
 | `,` `.` | exposição · `;` `'` nível de preto |
 
+O menu também traz uma barra de **campo de visão de 0 a 120 graus**. O valor
+efetivo é limitado a 1 grau no mínimo: em 0 a projeção seria um zoom infinito.
+
 Os widgets são de modo imediato: cada um se desenha e, no mesmo passo, testa se
 o mouse está em cima e se houve clique. Trocar o tamanho da célula realoca os
 buffers, então o `resize` é adiado para depois do `blit` — senão o menu
@@ -249,6 +252,44 @@ luminância vai de **0,48 a 0,81 (+69 %)** ao longo do ciclo, e a densidade méd
 de caracteres de todo o piso visível sobe **5,6 %** — a rua responde em texto ao
 texto do letreiro.
 
+## Gente e trânsito
+
+![rua](docs/rua.png)
+
+Pedestres e carros são sprites de arte ASCII desenhados como os letreiros: a
+peça é reescalada para o tamanho real do corpo ou do veículo e recortada célula
+a célula, com z-test por coluna e iluminação do lugar — quem passa debaixo de um
+poste acende junto.
+
+**Pedestres andam exclusivamente na calçada.** Cada um percorre o anel de
+calçada de um quarteirão, parametrizado pelo perímetro: não existe um caminho
+que os leve ao asfalto. A densidade segue o relógio da cidade:
+
+| horário | densidade |
+|---|---|
+| 08:00 – 12:00 | média (55 %) |
+| 12:01 – 19:00 | cheia (100 %) |
+| 19:01 – 24:00 | cai um pouco (60 %) |
+| 00:01 – 07:59 | bem raro (8 %) |
+
+Cada tipo tem sua janela: o **bêbado** só aparece de madrugada, é raro e é o
+único que não anda (fica oscilando no lugar); o **noturno** só entre 19:01 e
+07:59; o **executivo** e o **vestido** somem de madrugada; os outros dois
+circulam a qualquer hora.
+
+**Carros andam exclusivamente no asfalto.** Cada um mora num eixo viário, numa
+das duas mãos — toda rua é ida e volta —, a 20-30 km/h. Não colidem: cada carro
+olha uma janela de 14 m à frente e freia por quem estiver nela, o que resolve
+tanto a fila quanto o cruzamento, porque o carro que entra no cruzamento aparece
+nessa janela. Para o jogador o carro é sólido. A frota é proporcional à gente na
+rua.
+
+A peça muda com o ângulo de quem olha: frente, traseira ou lateral (espelhada
+conforme o lado).
+
+Verificado com 30 pedestres e 18 carros ativos: **zero pedestres fora da
+calçada, zero carros fora do asfalto e zero sobreposições entre carros**.
+
 ## Ciclo do dia e clima
 
 ![tarde](docs/tarde.png)
@@ -321,3 +362,10 @@ histórico do git, em `178d2b8`.
   <https://ko-fi.com/s/e1e0f91951>
 - Arte ASCII dos painéis: <https://ascii.co.uk/art>, mantida com a assinatura
   de quem a fez (lmg, anubis, mark, sk, ejm, jgs)
+- Carros: <https://ascii.co.uk/art/car> (ind, Lester, PS) — a assinatura foi
+  recortada do sprite porque ficaria flutuando ao lado do veículo em movimento
+- Pedestres: bonecos em traço feitos aqui. As peças pedidas em
+  `asciiart.website` não puderam ser baixadas — o site responde 403 atrás de um
+  CAPTCHA. A tabela `PED_ART` no começo da seção de gente e trânsito é só uma
+  lista de peças com nome, janela de horário e cor: trocar por outras artes é
+  editar essa tabela.

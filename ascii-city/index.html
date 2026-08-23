@@ -1092,6 +1092,24 @@ function emit(idx, r, g, b){
     cellCol[idx] = ((125 * v) | 0) << 16 | ((255 * v) | 0) << 8 | ((196 * v) | 0);
   }
 }
+/** como emitChar, mas o brilho vem da luz do lugar: um pedestre no escuro
+ *  fica escuro, sem perder o desenho */
+function emitCharLit(idx, glyph, r, g, b){
+  cellChar[idx] = glyph;
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  let t = 1 - Math.exp(-Math.max(lum, 0) * TUNE.exposure * ENV.exp);
+  t = Math.pow(t, TUNE.gamma);
+  if (t < 0.18) t = 0.18;                      // nunca some de vez
+  if (colorMode){
+    const m = Math.max(r, Math.max(g, b)) || 1e-6;
+    const s = (0.34 + 0.66 * t) * 255 / m;
+    const R = r * s, G = g * s, B = b * s;
+    cellCol[idx] = ((R > 255 ? 255 : R) | 0) << 16 | ((G > 255 ? 255 : G) | 0) << 8 | ((B > 255 ? 255 : B) | 0);
+  } else {
+    const v = 0.30 + 0.70 * t;
+    cellCol[idx] = ((125 * v) | 0) << 16 | ((255 * v) | 0) << 8 | ((196 * v) | 0);
+  }
+}
 function emitChar(idx, glyph, r, g, b){
   cellChar[idx] = glyph;
   if (colorMode){
@@ -1684,6 +1702,270 @@ function drawDeck(){
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* 7b. gente e trânsito                                                */
+/* ------------------------------------------------------------------ */
+/*  Pedestres e carros são sprites de arte ASCII desenhados como
+    letreiros: a peça é reescalada para o tamanho real do corpo ou do
+    veículo e recortada célula a célula, com z-test por coluna.
+
+    Pedestre anda EXCLUSIVAMENTE na calçada: cada um percorre o anel de
+    calçada de um quarteirão, parametrizado pelo perímetro, então nunca
+    tem como cair no asfalto. Carro anda EXCLUSIVAMENTE na rua: mora num
+    eixo viário, numa das duas mãos, e só avança ao longo dele.         */
+
+/* peças de pedestre — bonecos em traço, no lugar das artes do
+   asciiart.website, que está atrás de CAPTCHA e não pôde ser baixado */
+const PED_ART = [
+  { nome:"comum",     janela:"sempre",    anda:true,  cor:[0.78,0.83,0.95],
+    l:["  o  "," /|\\ ","  |  ","  |  ","  |  "," / \\ "," | | "," | | "," J L "] },
+  { nome:"andarilho", janela:"sempre",    anda:true,  cor:[0.90,0.78,0.52],
+    l:["  o  "," /|\\ "," ]|  "," ]|  ","  |  "," / \\ "," | | "," | | "," J L "] },
+  { nome:"executivo", janela:"diurno",    anda:true,  cor:[0.66,0.76,0.95],
+    l:["  o  "," /|\\ ","  |  ","  |= ","  |  "," / \\ "," | | "," | | "," J L "] },
+  { nome:"vestido",   janela:"diurno",    anda:true,  cor:[1.00,0.62,0.74],
+    l:["  o  "," /|\\ ","  |  "," /|\\ "," /_\\ "," | | "," | | "," | | "," J L "] },
+  { nome:"noturno",   janela:"noturno",   anda:true,  cor:[0.55,0.92,0.95],
+    l:[" ___ ","/o o\\","\\ | /","  |  ","  |  "," / \\ "," | | "," | | "," J L "] },
+  { nome:"bebado",    janela:"madrugada", anda:false, raro:true, cor:[0.95,0.82,0.42],
+    l:["  o  "," /|\\u","  |\\ ","  | \\"," /|  "," / \\ "," |  |"," |  |"," '  '"] }
+];
+for (const a of PED_ART){ a.w = a.l[0].length; a.h = a.l.length; }
+
+/* peças de carro, de ascii.co.uk/art/car (ind, Lester, PS) */
+const CAR_ART = {
+  lado: { w: 17, h: 6, l: ["  _______        ", " /______/\"=,     ", "[     | \"=, \"=,, ", "[-----+----\"=,* )", "(_---_____---_)/ ", "  (O)     (O)    "] },
+  lado2: { w: 14, h: 3, l: [" ____/   ___  ", "|_   \\__'  _\\ ", "`-(*)----(*)' "] },
+  frente: { w: 9, h: 4, l: ["  _____  ", " /_..._\\ ", "(0[###]0)", " `'   `' "] },
+  tras: { w: 7, h: 4, l: [" _____ ", "i_____i", "[\"___\"]", "|J---L|"] }
+};
+const CAR_CORES = [[0.85,0.30,0.28],[0.30,0.55,0.90],[0.90,0.85,0.55],
+                   [0.45,0.85,0.60],[0.85,0.85,0.90],[0.75,0.45,0.90]];
+
+/* ---- densidade pelo horário ---------------------------------------- */
+function horaAtual(){ return (ENV.t * 24 + 4.3) % 24; }
+function densidadeRua(){
+  const h = horaAtual();
+  if (h >= 8  && h < 12) return 0.55;   // manhã: média
+  if (h >= 12 && h < 19) return 1.00;   // tarde: cheia
+  if (h >= 19)           return 0.60;   // noite: cai um pouco
+  return 0.08;                          // madrugada: bem raro
+}
+function janelaOk(art, h){
+  switch (art.janela){
+    case "diurno":    return h >= 8;                 // some de madrugada
+    case "noturno":   return h >= 19 || h < 8;
+    case "madrugada": return h < 8;
+    default:          return true;
+  }
+}
+function sorteiaPed(h){
+  const ok = PED_ART.filter(a => janelaOk(a, h));
+  if (!ok.length) return PED_ART[0];
+  let a = ok[(Math.random() * ok.length) | 0];
+  if (a.raro && Math.random() > 0.16){               // o bêbado é exceção
+    const outros = ok.filter(x => !x.raro);
+    if (outros.length) a = outros[(Math.random() * outros.length) | 0];
+  }
+  return a;
+}
+
+/* ---- desenho de um sprite de arte ---------------------------------- */
+/*  ww/wh são as medidas REAIS do corpo ou do veículo; a peça é esticada
+    para caber nelas, então um carro visto de frente fica com 1,9 m de
+    largura e o mesmo carro de lado com 4,4 m, usando peças diferentes. */
+function drawArtSprite(wx, wz, yBase, ww, wh, art, r, g, b, flip){
+  const p = spriteProject(wx, wz);
+  if (!p) return;
+  const t = p.t;
+  const half = (ww * 0.5 / t / tanH) * (COLS / 2);
+  if (half < 0.35) return;
+  const yTop = horizon - (yBase + wh - cam.eye) * projV / t;
+  const yBot = horizon - (yBase - cam.eye) * projV / t;
+  if (yBot < 0 || yTop >= ROWS) return;
+  const rows = yBot - yTop;
+  if (rows < 0.6) return;
+
+  const fog = 1 - Math.exp(-(t / CFG.FOG) * (t / CFG.FOG) * 2.4);
+  const k = (1 - fog);
+  const sid = nextSpriteId();
+  const c0 = Math.max(0, Math.floor(p.col - half)), c1 = Math.min(COLS - 1, Math.ceil(p.col + half));
+  const y0 = Math.max(0, Math.floor(yTop)), y1 = Math.min(ROWS - 1, Math.ceil(yBot));
+
+  for (let cx = c0; cx <= c1; cx++){
+    if (t >= zbuf[cx]) continue;
+    let ax = Math.floor((cx + 0.5 - (p.col - half)) / (2 * half) * art.w);
+    if (ax < 0 || ax >= art.w) continue;
+    if (flip) ax = art.w - 1 - ax;
+    for (let y = y0; y <= y1; y++){
+      const ay = Math.floor((y + 0.5 - yTop) / rows * art.h);
+      if (ay < 0 || ay >= art.h) continue;
+      const ch = art.l[ay][ax];
+      if (ch === " " || ch === undefined) continue;
+      const i = y * COLS + cx;
+      cellDep[i] = t; cellId[i] = sid;
+      emitCharLit(i, ci(ch), r * k + 0.004, g * k + 0.004, b * k + 0.005);
+    }
+  }
+}
+
+/* ---- pedestres ------------------------------------------------------ */
+const PED_MAX = 30;
+const peds = [];
+const ringOut = { x: 0, z: 0, hx: 0, hz: 0 };
+
+/** ponto e direção sobre o anel de calçada do quarteirão */
+function ringPos(B, u, out){
+  const s = CFG.SIDEWALK_W / 2;
+  const x0 = B.x0 + s, z0 = B.z0 + s, x1 = B.x1 - s, z1 = B.z1 - s;
+  const w = x1 - x0, d = z1 - z0, P = 2 * (w + d);
+  u = ((u % P) + P) % P;
+  if (u < w)            { out.x = x0 + u;         out.z = z0;             out.hx = 1;  out.hz = 0; }
+  else if (u < w + d)   { out.x = x1;             out.z = z0 + (u - w);   out.hx = 0;  out.hz = 1; }
+  else if (u < 2*w + d) { out.x = x1 - (u-w-d);   out.z = z1;             out.hx = -1; out.hz = 0; }
+  else                  { out.x = x0;             out.z = z1 - (u-2*w-d); out.hx = 0;  out.hz = -1; }
+  return P;
+}
+function respawnPed(P){
+  const bi = idxX(cam.x) + ((Math.random() * 5) | 0) - 2;
+  const bj = idxZ(cam.z) + ((Math.random() * 5) | 0) - 2;
+  P.B = getBlock(bi, bj);
+  P.u = Math.random() * 4 * (P.B.w + P.B.d);
+  P.dir = Math.random() < 0.5 ? -1 : 1;
+  P.art = sorteiaPed(horaAtual());
+  P.v = P.art.anda ? 0.9 + Math.random() * 0.7 : 0;
+  P.lat = (Math.random() - 0.5) * (CFG.SIDEWALK_W - 1.2);
+  P.fase = Math.random() * 6.28;
+}
+function updatePeds(dt){
+  const alvo = Math.round(PED_MAX * densidadeRua());
+  while (peds.length < PED_MAX) peds.push({});
+  const h = horaAtual();
+  for (let k = 0; k < peds.length; k++){
+    const P = peds[k];
+    if (k >= alvo){ P.B = null; continue; }
+    if (!P.B) respawnPed(P);
+    P.u += P.dir * P.v * dt;
+    ringPos(P.B, P.u, ringOut);
+    P.x = ringOut.x - ringOut.hz * P.lat;
+    P.z = ringOut.z + ringOut.hx * P.lat;
+    const dx = P.x - cam.x, dz = P.z - cam.z;
+    const longe = dx*dx + dz*dz > 90 * 90;
+    if (longe || (longe === false && !janelaOk(P.art, h) && dx*dx + dz*dz > 35 * 35)) respawnPed(P);
+  }
+}
+function drawPeds(){
+  for (let k = 0; k < peds.length; k++){
+    const P = peds[k];
+    if (!P.B) continue;
+    const a = P.art;
+    // balanço leve de quem caminha; o bêbado só oscila no lugar
+    const sway = a.anda ? 0 : Math.sin(TIME * 1.6 + P.fase) * 0.10;
+    shade(P.x, 1.0, P.z, -dirX, 0.25, -dirZ);
+    const lit = 0.2126 * sR + 0.7152 * sG + 0.0722 * sB + 0.02;
+    drawArtSprite(P.x + sway, P.z, 0, 0.54, 1.76, a,
+                  a.cor[0] * lit, a.cor[1] * lit, a.cor[2] * lit, P.dir < 0);
+  }
+}
+
+/* ---- carros --------------------------------------------------------- */
+const CAR_MAX = 18;
+const cars = [];
+const CAR_LEN = 4.3, CAR_WID = 1.9, CAR_ALT = 1.5, LANE = 3;
+
+function respawnCar(C, first){
+  C.ax = Math.random() < 0.5 ? 0 : 1;                // 0: rua ao longo de Z
+  C.idx = (C.ax === 0 ? idxX(cam.x) : idxZ(cam.z)) + ((Math.random() * 3) | 0) - 1;
+  C.lane = Math.random() < 0.5 ? -1 : 1;             // mão e contramão
+  const base = C.ax === 0 ? cam.z : cam.x;
+  C.s = base + (Math.random() < 0.5 ? -1 : 1) * (28 + Math.random() * 45);
+  if (first) C.s = base + (Math.random() - 0.5) * 120;
+  C.vmax = 5.5 + Math.random() * 3.0;                // devagar, de cidade
+  C.v = C.vmax;
+  C.cor = CAR_CORES[(Math.random() * CAR_CORES.length) | 0];
+  C.lado2 = Math.random() < 0.45;
+  C.pos = { x: 0, z: 0 };
+}
+function carPos(C, out){
+  if (C.ax === 0){ out.x = axisX(C.idx) + C.lane * LANE; out.z = C.s; }
+  else           { out.z = axisZ(C.idx) + C.lane * LANE; out.x = C.s; }
+}
+function carFwd(C, out){
+  if (C.ax === 0){ out.x = 0; out.z = C.lane; } else { out.x = C.lane; out.z = 0; }
+}
+const cf = { x: 0, z: 0 };
+
+function updateCars(dt){
+  const alvo = Math.round(CAR_MAX * densidadeRua());
+  while (cars.length < CAR_MAX) { const C = {}; respawnCar(C, true); cars.push(C); }
+  for (let k = 0; k < cars.length; k++){
+    const C = cars[k];
+    if (k >= alvo){ C.off = true; continue; }
+    if (C.off){ C.off = false; respawnCar(C); }
+    carPos(C, C.pos);
+  }
+  // freia por quem estiver à frente — vale tanto para fila quanto para
+  // cruzamento, porque o carro que entra no cruzamento aparece na janela
+  for (let k = 0; k < cars.length; k++){
+    const A = cars[k];
+    if (A.off) continue;
+    carFwd(A, cf);
+    let alvoV = A.vmax;
+    for (let m = 0; m < cars.length; m++){
+      if (m === k) continue;
+      const Bc = cars[m];
+      if (Bc.off) continue;
+      const dx = Bc.pos.x - A.pos.x, dz = Bc.pos.z - A.pos.z;
+      const along = dx * cf.x + dz * cf.z;
+      if (along <= 0 || along > 14) continue;
+      const lat = Math.abs(dx * cf.z - dz * cf.x);
+      if (lat > 3.2) continue;
+      const v = Math.max(0, (along - CAR_LEN - 1.2) * 1.5);
+      if (v < alvoV) alvoV = v;
+    }
+    A.v += (alvoV - A.v) * (1 - Math.exp(-3.2 * dt));
+    A.s += A.lane * A.v * dt;
+    carPos(A, A.pos);
+    const dx = A.pos.x - cam.x, dz = A.pos.z - cam.z;
+    if (dx*dx + dz*dz > 105 * 105) respawnCar(A);
+  }
+}
+function drawCars(){
+  for (let k = 0; k < cars.length; k++){
+    const C = cars[k];
+    if (C.off) continue;
+    carFwd(C, cf);
+    const dx = cam.x - C.pos.x, dz = cam.z - C.pos.z;
+    const inv = 1 / Math.max(0.001, Math.hypot(dx, dz));
+    const d = (dx * cf.x + dz * cf.z) * inv;         // >0: estamos na frente
+    let art, ww, flip = false;
+    if (d > 0.55)       { art = CAR_ART.frente; ww = CAR_WID; }
+    else if (d < -0.55) { art = CAR_ART.tras;   ww = CAR_WID; }
+    else {
+      art = C.lado2 ? CAR_ART.lado2 : CAR_ART.lado;
+      ww = CAR_LEN;
+      flip = (dx * cf.z - dz * cf.x) < 0;
+    }
+    shade(C.pos.x, 0.8, C.pos.z, -dirX, 0.2, -dirZ);
+    const lit = 0.2126 * sR + 0.7152 * sG + 0.0722 * sB + 0.03;
+    drawArtSprite(C.pos.x, C.pos.z, 0.12, ww, CAR_ALT, art,
+                  C.cor[0] * lit, C.cor[1] * lit, C.cor[2] * lit, flip);
+  }
+}
+/** o carro é sólido para o jogador */
+function hitsCar(x, z, r){
+  for (let k = 0; k < cars.length; k++){
+    const C = cars[k];
+    if (C.off) continue;
+    const dx = x - C.pos.x, dz = z - C.pos.z;
+    carFwd(C, cf);
+    const along = Math.abs(dx * cf.x + dz * cf.z);
+    const lat   = Math.abs(dx * cf.z - dz * cf.x);
+    if (along < CAR_LEN * 0.5 + r && lat < CAR_WID * 0.5 + r) return true;
+  }
+  return false;
+}
+
 /** baliza no alto da torre: pisca em vermelho, visível de longe */
 function drawBeacon(bc){
   const p = spriteProject(bc.x, bc.z);
@@ -1711,6 +1993,8 @@ function renderSprites(){
       for (let k = 0; k < B.beacons.length; k++) drawBeacon(B.beacons[k]);
     }
   }
+  drawCars();
+  drawPeds();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1739,7 +2023,8 @@ function topUnder(x, z, r){
 /* Só é parede o que estiver acima dos pés mais o degrau: assim dá para subir
    num canteiro baixo andando, e pular em cima de um mais alto. */
 function blockedAt(x, z, r){
-  return topUnder(x, z, r) > player.y + STEP_UP || hitsLamp(x, z, r) || hitsTree(x, z, r);
+  return topUnder(x, z, r) > player.y + STEP_UP ||
+         hitsLamp(x, z, r) || hitsTree(x, z, r) || hitsCar(x, z, r);
 }
 function hitsTree(x, z, r){
   const bi = idxX(x), bj = idxZ(z);
@@ -1786,6 +2071,8 @@ function respawn(){
 }
 
 function update(dt){
+  updateCars(dt);
+  updatePeds(dt);
   const sprint = keys.has("ShiftLeft") || keys.has("ShiftRight");
   let ix = 0, iz = 0;
   if (locked){
@@ -2173,6 +2460,11 @@ function drawMenu(){
   });
   items.push(y => { TUNE.exposure = uiSlider(cx0, y, cw, "exposicao", TUNE.exposure, 1, 16, TUNE.exposure.toFixed(1)); });
   items.push(y => { TUNE.black    = uiSlider(cx0, y, cw, "nivel de preto", TUNE.black, 0, 0.1, TUNE.black.toFixed(3)); });
+  items.push(y => {
+    const g = uiSlider(cx0, y, cw, "campo de visao", TUNE.fov * 180 / Math.PI, 0, 120,
+                       (TUNE.fov * 180 / Math.PI).toFixed(0) + " g");
+    TUNE.fov = clamp(g, 1, 120) * Math.PI / 180;    // 0 grau seria zoom infinito
+  });
   items.push(nop);
 
   items.push(y => uiRule(cx0 - 1, y, cw + 2, "MUNDO"));
@@ -2216,7 +2508,7 @@ function relogio(){
 function statsLine(){
   return "fps " + fps.toFixed(0) + "  " + frameMs.toFixed(1) + "ms  " +
          relogio() + " " + ENV.name + "  " + ENV.weather +
-         "  pos " + cam.x.toFixed(0) + "," + cam.z.toFixed(0);
+         "  rua " + Math.round(densidadeRua() * 100) + "%";
 }
 
 /** HUD opcional, desligado por padrão: uma linha discreta no rodapé */
