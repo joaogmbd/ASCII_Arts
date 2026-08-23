@@ -1121,6 +1121,8 @@ let projH = 0, projV = 0, horizon = 0, tanH = 0;
    resolver a linha por conta.                                          */
 let rowTan = null;                  // tangente da elevação de cada linha
 const PITCH_MAX = 0.85;             // ~49°: além disso o esticamento domina
+const VFOV_MAX = 70 * Math.PI / 180; // teto do campo vertical
+const TAN_VMAX = Math.tan(VFOV_MAX / 2);
 
 /** linha (contínua) onde cai um ponto a `dy` de altura e `d` de distância */
 function rowAt(dy, d){ return horizon - (dy / d) * projV; }
@@ -1552,6 +1554,15 @@ function renderWorld(){
   tanH  = Math.tan(TUNE.fov / 2);
   projH = (COLS / 2) / tanH;
   projV = projH * cellW / cellH;
+  /* Trava do campo VERTICAL. A barra ajusta o campo horizontal, e num
+     pinhole o vertical vem junto: a 120° na horizontal dá ~90° na
+     vertical, aí metade da tela é chão e o pouco de mundo que sobra na
+     metade de baixo é esticado sobre 32 linhas. Andando e olhando para
+     baixo é isso que vira borrão. Acima da trava, o que a barra abre vai
+     só para os lados — é o "Hor+" dos jogos, e o preço é um leve
+     esmagamento anamórfico, muito mais barato que o borrão.            */
+  const projVmin = (ROWS / 2) / TAN_VMAX;
+  if (projV < projVmin) projV = projVmin;
   octK = COLS / (2 * tanH * 2.2);      // ~2 caracteres por célula de grão
   buildTone();
   horizon = ROWS / 2 + Math.tan(cam.pitch) * projV;
@@ -2125,7 +2136,8 @@ function respawnCar(C, first){
   C.v = C.vmax;
   C.cor = CAR_CORES[(Math.random() * CAR_CORES.length) | 0];
   C.lado2 = Math.random() < 0.45;
-  C.pos = { x: 0, z: 0 };
+  C.pos = C.pos || { x: 0, z: 0 };
+  C.ger = (C.ger || 0) + 1;         // um respawn encerra a passada em curso
 }
 function carPos(C, out){
   if (C.ax === 0){ out.x = axisX(C.idx) + C.lane * LANE; out.z = C.s; }
@@ -2460,6 +2472,148 @@ function update(dt){
   updateSignLights();
   updateDrops(dt);
   portaPerto = acharPorta();
+  somUpdate(dt);
+}
+
+/* ------------------------------------------------------------------ */
+/* 8b. som                                                             */
+/* ------------------------------------------------------------------ */
+/*  <audio> puro, de propósito, sem Web Audio. Abrir o index.html direto
+    do disco faz o navegador tratar o mp3 como origem opaca, e um
+    MediaElementSource ligado a ele toca em SILÊNCIO — o jogo é um
+    arquivo só, que se abre com duplo clique, então isso não serve.
+    Com elemento e `.volume` o som toca nos dois casos, servido por HTTP
+    e pelo disco, e volume é justamente o que precisa ser dinâmico.
+
+    Nenhuma camada liga e desliga: cada uma tem um ALVO recalculado por
+    quadro a partir da própria fonte — a distância do carro, quanta gente
+    há na rua, a intensidade da chuva, a fase do dia, a altura do
+    jogador — e persegue esse alvo com uma constante de tempo. Sem isso
+    cada mudança de estado viraria um estalo.                           */
+
+const SND_DIR = "assets/sounds/";
+let somOn = true, somVol = 0.75, somPronto = false;
+
+function camada(arq, subida, descida, teto){
+  const el = new Audio(SND_DIR + arq);
+  el.loop = true; el.preload = "auto"; el.volume = 0;
+  return { el, alvo: 0, v: 0, subida, descida, teto, tocando: false };
+}
+const LOOPS = {
+  gente:    camada("perymarques-people-talking-289717.mp3",                        0.7, 0.7, 0.60),
+  chuva:    camada("solarmusic-light-rain-and-birds-with-distant-thunder-113478.mp3", 0.9, 0.5, 0.70),
+  trovao:   camada("alex_jauk-distant-thunder-and-highway-149579.mp3",             0.9, 0.5, 0.70),
+  alvorada: camada("freesound_community-natural-ambience-01-32549.mp3",            0.4, 0.4, 0.50),
+  vento:    camada("soundreality-wind-blowing-457954.mp3",                         1.3, 1.0, 0.65)
+};
+
+/* ---- carro passando: uma passada por carro, seguindo o carro -------- */
+const CAR_SND = SND_DIR + "tanweraman-car-pass-by-337871.mp3";
+const CAR_RAIO = 20;                    // além disto o carro não se ouve
+const passadas = [], carLivres = [];
+for (let i = 0; i < 4; i++){
+  const a = new Audio(CAR_SND); a.preload = "auto"; a.volume = 0;
+  carLivres.push(a);
+}
+function ganhoCarro(C){
+  const dx = C.pos.x - cam.x, dz = C.pos.z - cam.z;
+  const d = Math.hypot(dx, dz);
+  if (d >= CAR_RAIO) return 0;
+  const k = 1 - d / CAR_RAIO;
+  return k * k;                          // cai com o quadrado: passa e some
+}
+function somCarros(){
+  for (let i = passadas.length - 1; i >= 0; i--){
+    const p = passadas[i];
+    const fim = p.el.ended || p.el.paused || p.C.off || p.C.ger !== p.ger;
+    if (fim){
+      p.el.pause(); p.el.volume = 0; p.C.soando = false;
+      carLivres.push(p.el); passadas.splice(i, 1); continue;
+    }
+    p.el.volume = somOn ? clamp(ganhoCarro(p.C) * somVol, 0, 1) : 0;
+  }
+  if (!somOn) return;
+  for (let k = 0; k < cars.length; k++){
+    const C = cars[k];
+    if (C.off || C.soando) continue;
+    const g = ganhoCarro(C);
+    if (g < 0.05) continue;              // só começa quando dá para ouvir
+    const el = carLivres.pop();
+    if (!el) break;
+    C.soando = true;
+    el.volume = clamp(g * somVol, 0, 1);
+    try { el.currentTime = 0; } catch (e) {}
+    el.play().catch(() => {});
+    passadas.push({ el, C, ger: C.ger });
+  }
+}
+
+/* ---- alvo de cada camada, lido da fonte ----------------------------- */
+function somAlvos(){
+  const L = LOOPS;
+
+  /* gente: a densidade do horário diz quanta gente a cidade tem, mas o
+     que se ouve é quanta gente está PERTO — dentro de um quarteirão. */
+  let perto = 0;
+  for (let k = 0; k < peds.length; k++){
+    const P = peds[k];
+    if (!P.B) continue;
+    const dx = P.x - cam.x, dz = P.z - cam.z;
+    if (dx * dx + dz * dz < 34 * 34) perto++;
+  }
+  L.gente.alvo = densidadeRua() * (0.45 + 0.55 * clamp(perto / 4, 0, 1));
+
+  /* chuva e trovão: as duas peças se revezam, uma por trecho de clima,
+     e o volume acompanha o quanto está caindo. Neve não toca chuva. */
+  const molhado = ENV.fall > 0.02 && ENV.snowy < 0.5;
+  const forca = clamp(ENV.fall, 0, 1) * (ENV.weather === "tempestade" ? 1.0 : 0.72);
+  const par = hash3(Math.floor(TIME / WEATHER_S), 991, WSEED) < 0.5;
+  L.chuva.alvo  = molhado && par  ? forca : 0;
+  L.trovao.alvo = molhado && !par ? forca : 0;
+
+  /* amanhecer: sino em volta do quadro-chave de nascer do sol (t=0.07),
+     e some se estiver chovendo em cima. */
+  let dt2 = Math.abs(ENV.t - 0.07);
+  if (dt2 > 0.5) dt2 = 1 - dt2;
+  L.alvorada.alvo = clamp(1 - dt2 / 0.085, 0, 1) * (1 - clamp(ENV.fall, 0, 1) * 0.8);
+
+  /* vento: só existe altura acima. Silêncio na rua, cheio numa laje. */
+  L.vento.alvo = clamp((player.y - 9) / 30, 0, 1) *
+                 (0.75 + 0.25 * clamp(ENV.gust || 0, 0, 1));
+}
+
+function somUpdate(dt){
+  if (!somPronto) return;
+  somAlvos();
+  for (const k in LOOPS){
+    const L = LOOPS[k];
+    const alvo = somOn ? L.alvo * L.teto : 0;
+    const taxa = alvo > L.v ? L.subida : L.descida;
+    L.v += (alvo - L.v) * (1 - Math.exp(-taxa * dt));
+    const vol = clamp(L.v * somVol, 0, 1);
+    if (vol > 0.004){
+      if (!L.tocando){ L.tocando = true; L.el.play().catch(() => { L.tocando = false; }); }
+      L.el.volume = vol;
+    } else if (L.tocando){
+      L.tocando = false; L.el.volume = 0; L.el.pause();
+    }
+  }
+  somCarros();
+}
+
+/** o navegador só deixa tocar depois de um gesto do usuário, então o
+    clique que entra na cidade destrava tudo: dá play mudo e pausa. */
+function somInit(){
+  if (somPronto) return;
+  somPronto = true;
+  const destrava = el => {
+    el.volume = 0;
+    const pr = el.play();
+    if (pr && pr.then) pr.then(() => { el.pause(); try { el.currentTime = 0; } catch (e) {} })
+                         .catch(() => {});
+  };
+  for (const k in LOOPS) destrava(LOOPS[k].el);
+  for (const el of carLivres) destrava(el);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2475,6 +2629,7 @@ let mouseGX = -1, mouseGY = -1, mouseDown = false, mouseClick = false;
 let fps = 60, frameMs = 0;
 
 function requestLock(){
+  somInit();                                   // gesto do usuário: destrava o áudio
   const pr = canvas.requestPointerLock({ unadjustedMovement: true });
   if (pr && typeof pr.catch === "function") pr.catch(() => { try { canvas.requestPointerLock(); } catch (e) {} });
 }
@@ -2500,6 +2655,7 @@ document.addEventListener("mousemove", (e) => {
   } else gridFromEvent(e);
 });
 canvas.addEventListener("mousedown", (e) => {
+  somInit();
   if (locked) return;
   gridFromEvent(e);
   mouseDown = true; mouseClick = true;
@@ -2780,6 +2936,14 @@ function drawMenu(){
   items.push(y => {
     TUNE.dist = Math.round(uiSlider(cx0, y, cw, "alcance de visao", TUNE.dist, 60, 420,
                                     TUNE.dist.toFixed(0) + " m"));
+  });
+  items.push(nop);
+
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "SOM"));
+  items.push(y => { if (uiToggle(cx0, y, cw, "som", somOn)) somOn = !somOn; });
+  items.push(y => {
+    somVol = uiSlider(cx0, y, cw, "volume", somVol, 0, 1,
+                      Math.round(somVol * 100) + " %");
   });
   items.push(nop);
 
