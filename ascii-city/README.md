@@ -1,174 +1,161 @@
 # ASCII CITY — protótipo de jogo 3D em ASCII
 
-Um jogo 3D de exploração em primeira pessoa cujo frame inteiro é desenhado com
-caracteres ASCII. Roda direto no navegador, em um único arquivo HTML, sem
-dependências, sem build e sem servidor.
-
-Inspirado na ideia central do **ASCII CITY Prototype 1** (Grow Now! Games) —
-uma metrópole cyberpunk feita de texto. Este aqui é uma implementação
-independente, com engine própria em WebGL2.
+Um jogo de exploração em primeira pessoa numa metrópole cyberpunk **infinita**,
+desenhado inteiramente com caracteres. Roda no navegador, em um único arquivo
+HTML, sem dependências, sem build, sem servidor — e **sem WebGL**.
 
 ![rua](docs/street.png)
 
 ## Como rodar
 
-Abra `index.html` no navegador (duplo clique já funciona — o arquivo é
-autocontido e não usa módulos ES nem `fetch`).
-
-Se preferir servir por HTTP:
+Abra `index.html` no navegador (duplo clique funciona — o arquivo é
+autocontido). Se preferir servir por HTTP:
 
 ```bash
-cd ascii-city
-python3 -m http.server 8000
-# http://localhost:8000
+cd ascii-city && python3 -m http.server 8000   # http://localhost:8000
 ```
-
-Requisitos: qualquer navegador com **WebGL2** e aceleração de hardware
-(Chrome, Edge, Firefox, Safari 15+).
 
 ## Controles
 
 | Tecla | Ação |
 |---|---|
 | `W` `A` `S` `D` | andar |
-| mouse | girar a câmera (clique para capturar o cursor, `ESC` solta) |
+| mouse | olhar (clique para capturar o cursor, `ESC` solta) |
 | `SHIFT` | correr |
-| `C` | cor ↔ mono (verde de terminal) |
-| `E` | liga/desliga os glifos de contorno |
-| `X` | mostra o render 3D cru, sem ASCII (ótimo para entender o pipeline) |
-| `V` | efeito CRT (scanline + vinheta) |
-| `[` `]` | tamanho da célula: 4/6/8/10/12/16 px por caractere |
+| `C` | cor ↔ mono | 
+| `L` | liga/desliga a iluminação dinâmica |
+| `E` | liga/desliga os contornos |
+| `M` | minimapa · `H` HUD · `F` tela cheia |
+| `[` `]` | tamanho do caractere (6×10 até 14×25 px) |
 | `1` `2` `3` `4` | conjunto de caracteres |
-| `G` | gera uma cidade nova |
-| `R` | volta ao ponto inicial |
-| `F` | tela cheia |
-| `H` | mostra/esconde o HUD |
-| `,` `.` | exposição |
-| `;` `'` | nível de preto |
-| `-` `=` | limiar de contorno |
+| `G` | gera outro mundo · `R` respawn |
+| `,` `.` | exposição · `;` `'` nível de preto |
 
-## Como o 3D vira ASCII
+## Nada de 3D por baixo
 
-A abordagem é a que se usa hoje em *shaders* de ASCII art (popularizada pelo
-vídeo do Acerola sobre "graphics to text"): **não se desenha texto — desenha-se
-a cena em 3D normalmente e converte-se a imagem para uma grade de caracteres em
-pós-processamento**, na GPU. São quatro passes por frame:
+Esta é a diferença central em relação à primeira versão (que rasterizava a cena
+em WebGL e convertia a imagem para texto num pós-processamento). Aqui **não
+existe imagem intermediária**: o frame é escrito direto num buffer de
+caracteres, como os engines de modo texto dos anos 90, e só no fim esse buffer
+vira pixels.
+
+O resultado é ~**3 ms por frame em renderização por software** (SwiftShader,
+sem GPU nenhuma) contra ~55 ms da versão anterior.
 
 ```
-                 ┌───────────────────────────────────────────┐
-   cidade 3D ───▶│ 1. cena (MRT)   alvo0: cor  alvo1: normal  │  W × H
-                 └───────────────────────────────────────────┘
-                                   │
-                 ┌───────────────────────────────────────────┐
-                 │ 2. Sobel sobre luminância + sobre normais  │  W × H
-                 │    → magnitude e ângulo da borda           │
-                 └───────────────────────────────────────────┘
-                                   │
-                 ┌───────────────────────────────────────────┐
-                 │ 3. downsample: 1 texel = 1 caractere       │  cols × rows
-                 │    cor média + histograma de direções      │
-                 └───────────────────────────────────────────┘
-                                   │
-                 ┌───────────────────────────────────────────┐
-                 │ 4. composição: escolhe o glifo e amostra   │  W × H
-                 │    o atlas de fonte                        │
-                 └───────────────────────────────────────────┘
+   por coluna da tela
+   ┌──────────────────────────────────────────────────────────┐
+   │ DDA sobre a malha de 1 m, gerada sob demanda             │
+   │   → registra cada face de parede exposta (h > h anterior)│
+   │   → para quando uma parede já cobre o topo da tela       │
+   ├──────────────────────────────────────────────────────────┤
+   │ piso: floor casting (distância = eye·projV / (y-horiz))  │
+   │ paredes: algoritmo do pintor, do fundo para a frente     │
+   │ céu: gradiente + estrelas fixas em coordenada de mundo   │
+   ├──────────────────────────────────────────────────────────┤
+   │ sprites (postes, árvores) com z-test por coluna          │
+   └──────────────────────────────────────────────────────────┘
+   depois, sobre a grade inteira
+   ┌──────────────────────────────────────────────────────────┐
+   │ contornos: onde o id de superfície muda entre células    │
+   │   vizinhas e a vizinha está mais longe → | - / \         │
+   ├──────────────────────────────────────────────────────────┤
+   │ blit: máscara do glifo (3 níveis) → ImageData            │
+   └──────────────────────────────────────────────────────────┘
 ```
 
-**1. Cena.** Rasterização comum em WebGL2 num framebuffer offscreen, com
-*multiple render targets*: o alvo 0 guarda a cor iluminada; o alvo 1 guarda a
-normal codificada e uma máscara (alfa 0 = céu, 1 = geometria). A cidade inteira
-é uma única malha estática, desenhada em um só `drawArrays`.
+**Paredes de altura variável.** Um raycaster clássico só tem uma altura. Aqui a
+malha guarda a altura de cada tile em metros, e o DDA registra uma face nova
+sempre que a altura sobe em relação ao tile anterior — o que também expõe o
+prédio alto que está atrás do baixo. As faces são desenhadas do fundo para a
+frente, então a oclusão sai de graça. A marcha para assim que uma parede cobre
+o topo da tela: nada atrás dela pode aparecer.
 
-**2. Bordas.** Um Sobel 3×3 roda sobre dois campos: a luminância (pega detalhe
-interno, como a malha de janelas) e um escalar derivado das normais (pega
-quinas e silhuetas contra o céu — inclusive contra o céu, porque ali a máscara
-zera). Fica a maior das duas magnitudes, e o gradiente correspondente dá o
-ângulo. O ângulo perpendicular ao gradiente é quantizado em 4 faixas de 45°,
-que correspondem a `-` `/` `|` `\`.
+**Contornos geométricos, não Sobel.** A v1 procurava bordas na imagem. Aqui não
+há imagem — há o z-buffer da própria grade de caracteres, mais um id de
+superfície por célula (0 céu, 1 piso, um id estável por face de prédio, um por
+sprite). Onde o id muda entre vizinhas e a vizinha está mais longe, o glifo vira
+o traço da direção da descontinuidade. A silhueta é exata e custa uma varredura
+da grade.
 
-**3. Downsample.** Cada texel do alvo é uma célula de caractere. O shader
-percorre o bloco de `cell × cell` pixels acumulando a cor média e um histograma
-com 4 baldes de direção, ponderado pela magnitude. Se o balde vencedor cobrir
-uma fração suficiente da célula (`uCoverage`), a célula é marcada como traço
-direcional; senão ela é uma célula de densidade.
-
-**4. Composição.** A luminância da célula passa por um nível de preto, um
-tonemap exponencial (`1 - e^(-l·exp)`) e gama, e o resultado indexa a rampa de
-densidade — `" .,:;i1tfLCG08@"` por padrão. Células de borda usam o glifo
-direcional. O glifo sai de um **atlas gerado em runtime**: um `<canvas>` 2D
-desenha cada caractere numa célula de 16 px e vira textura, então trocar de
-conjunto de caracteres é instantâneo e não há nenhum asset externo.
-
-No modo colorido a cor da célula é normalizada (matiz preservado, brilho vindo
-do glifo) e quantizada em poucos níveis, que é o que dá o aspecto de terminal
-de 256 cores.
-
-### Por que essa ordem importa
-
-Fazer o downsample *antes* da detecção de bordas destrói justamente a
-informação que os traços `/ | \ -` precisam. E detectar bordas só pela
-luminância perde as silhuetas dos prédios contra o céu escuro — daí o segundo
-campo, baseado em normais.
+**O terminal.** Cada glifo é rasterizado uma vez num canvas de `cellW × cellH`,
+e guardado como a lista dos seus pixels acesos com o nível de alfa quantizado em
+3. Desenhar uma célula é percorrer só esses pixels escrevendo a cor já
+pré-multiplicada num `Uint32Array` — sem `fillText` por célula, sem GPU.
 
 ## A cidade
 
-Gerada proceduralmente com um PRNG determinístico (`mulberry32`), então a mesma
-seed dá sempre a mesma cidade. Grade de quarteirões de 17 m separados por ruas
-de 9 m; cada lote é subdividido em 1, 2 ou 4 torres, cada uma com até 3 volumes
-empilhados com recuo. Prédios mais altos perto do centro. Alguns lotes viram
-praças. Antenas e caixas d'água nos telhados, letreiros de neon nas fachadas,
-postes de luz nas esquinas.
+Infinita nos quatro sentidos, determinística, e nada é guardado além dos
+quarteirões próximos (o cache segura ~220 e descarta os mais antigos).
 
-As janelas **não são geometria**: o fragment shader recebe UVs em coordenadas
-de mundo (metros) e desenha a malha de janelas com `fract`, decidindo acesa /
-apagada / cor por um hash da célula. Isso mantém a malha em ~7 mil triângulos e
-alinha as janelas entre volumes empilhados.
+![minimapa e HUD](docs/hud.png)
 
-Colisão é AABB 2D contra a lista de bases dos prédios, resolvida eixo a eixo
-(o que dá deslizamento na parede). A altura do olho interpola ao subir na
-calçada.
+### O traçado
 
-### Duas armadilhas que valem registrar
+Segue como se desenha um plano viário de verdade:
 
-- **`flat` no atributo de seed.** O seed de cada prédio viaja num atributo de
-  vértice. Interpolado, ele varia ~1 ULP entre pixels vizinhos — invisível
-  sozinho, mas os hashes amplificam isso em ruído por pixel na fachada inteira.
-  A correção é qualificar o varying como `flat` (e usar hashes robustos a
-  entradas grandes, no estilo Dave Hoskins).
-- **`glClear(DEPTH_BUFFER_BIT)` respeita a máscara de profundidade.** Com
-  `depthMask(false)` herdado do passe do céu, o depth buffer nunca era limpo:
-  o primeiro frame desenhava a cidade e todos os seguintes eram rejeitados pelo
-  teste de profundidade. Só o céu aparecia.
+- **A caixa da rua tem largura fixa** (12 m) em toda a cidade — é isso que dá a
+  leitura de cidade planejada. O que varia é o miolo do quarteirão.
+- **Os eixos de rua são uma sequência 1-D separável** em X e em Z:
+  `eixo(i) = round(i·46 + ruído(i)·18)`. Como o jitter é menor que a média, a
+  sequência é monotônica e cada eixo se calcula isolado, sem acumular desde a
+  origem — é o que torna a malha infinita e ainda assim perfeitamente alinhada.
+  Como os eixos são inteiros e a caixa é par, a rua mede exatos 12 m sempre.
+- **A calçada** é uma faixa de 3 m medida para dentro do quarteirão, então toda
+  esquina fecha certo.
+- **O miolo é loteado por subdivisão binária recursiva** até cada lote ficar
+  entre 9 e 19 m de testada. Os lotes se encostam: paredes geminadas, como num
+  quarteirão real.
+
+Verificado por teste sobre 256 quarteirões: **zero sobreposições e 100 % das
+caixas de rua com exatamente 12 m**.
+
+### O que é procedural
+
+| | como |
+|---|---|
+| tamanho dos quarteirões | jitter no eixo de rua → 19 a 48 m de miolo |
+| altura dos prédios | ruído de valor suave em coordenadas de quarteirão define o *distrito*; o lote varia em torno desse patamar; 7 % viram torre isolada, 10 % viram térreo comercial. Resultado medido: 1 a 24 andares, mediana 10 |
+| loteamento | subdivisão binária com corte sorteado |
+| postes | vão sorteado em [10 m, 15 m] e depois **corrigido** até caber de fato na faixa; altura em [4,2 m, 6,2 m]. Medido: menor distância real entre dois postes = 9,3 m |
+| outdoors e telões | fachada que dá para a rua, posição, tamanho, cor, texto e animação |
+| praças | 9 % dos quarteirões, com canteiros e arborização |
+
+### Luz
+
+![outdoor](docs/billboard.png)
+
+Cada poste, outdoor e telão é uma luz pontual real. Para não testar todas contra
+cada célula, elas entram numa grade uniforme cuja célula tem o tamanho do raio
+máximo: varrer os 3×3 buckets em volta do ponto basta para pegar todas as luzes
+que o alcançam. Cada célula de parede, piso ou sprite é sombreada com
+`atenuação × N·L` — é isso que faz a poça de luz embaixo do poste e o clarão do
+letreiro na fachada vizinha.
+
+![telão](docs/screen.png)
+
+Os **outdoors** desenham o texto com uma fonte matricial 5×7 em blocos, como um
+painel de LED: de perto dá para ler a mensagem passando, de longe vira um borrão
+colorido — igual na rua. Os **telões** rodam um equalizador animado. Ambos
+emitem luz proporcional à sua área.
 
 ## Ajustes
 
-Os parâmetros ficam todos no objeto `S`, no início da seção de estado:
+Tudo em `CFG` (traçado urbano) e `TUNE` (mapeamento de luminância). Os quatro
+conjuntos de caracteres e seis tamanhos de célula trocam em tempo real:
 
-| campo | efeito |
-|---|---|
-| `cellIdx` | tamanho da célula (índice em `CELL_SIZES`) |
-| `exposure` / `gamma` / `black` | mapeamento de luminância para a rampa |
-| `edgeThresh` / `coverage` | quanto de borda é preciso para virar um traço |
-| `lumaW` / `normalW` | peso de cada campo na detecção de bordas |
-| `levels` | níveis de quantização de cor |
-| `fog` | densidade da névoa (define a distância de visão) |
-
-A resolução do render acompanha a janela, limitada a 320×200 caracteres; acima
-disso a imagem é escalada por CSS, mantendo os glifos nítidos.
+![mono](docs/mono.png)
+![blocos](docs/blocks.png)
 
 ## Próximos passos
 
-- interiores e elevadores (o protótipo de referência tem os dois)
-- oclusão / culling por quarteirão, para cidades bem maiores
-- controles de toque para celular
-- áudio
-- tipografia com largura variável de célula (fontes não são quadradas)
+- interiores e elevadores
+- carros e pedestres (sprites já têm z-test)
+- áudio e controles de toque
+- ruas em diagonal / avenidas (hoje a malha é estritamente ortogonal)
 
-## Referências
+## Histórico
 
-- Acerola — *I Tried Turning Games Into Text* (shader de ASCII com detecção de
-  bordas, quantização de cor e atlas de glifos)
-- Winnemöller et al. — *XDoG: an eXtended difference-of-Gaussians compendium*
-- ASCII CITY Prototype 1, Grow Now! Games — <https://ko-fi.com/s/e1e0f91951>
-- WebGL2 Fundamentals — *Text: Using a Glyph Texture*
+A v1 usava WebGL2 com MRT, Sobel em luminância + normais, e composição de glifos
+num shader — a técnica de "graphics to text" popularizada pelo Acerola. Está no
+histórico do git, em `178d2b8`.

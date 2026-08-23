@@ -5,11 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>ASCII CITY — protótipo 3D</title>
 <style>
-  :root{
-    --ink:#7dffc4;
-    --dim:#2f6b55;
-    --bg:#04070a;
-  }
+  :root{ --ink:#7dffc4; --dim:#2f6b55; --bg:#04070a; }
   *{box-sizing:border-box}
   html,body{
     margin:0;padding:0;height:100%;width:100%;
@@ -18,76 +14,49 @@
     overflow:hidden;
   }
   #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg)}
-  canvas{
-    display:block;
-    image-rendering:pixelated;
-    image-rendering:crisp-edges;
-    background:#000;
-  }
+  canvas{display:block;image-rendering:pixelated;background:#000}
   .overlay{position:fixed;pointer-events:none;user-select:none}
-
-  /* ---------- HUD ---------- */
-  #hud{
-    top:0;left:0;right:0;bottom:0;
-    font-size:12px;line-height:1.45;
-    text-shadow:0 0 6px rgba(125,255,196,.35);
-  }
-  #hud .panel{
-    position:absolute;padding:8px 10px;
-    border:1px solid var(--dim);
-    background:rgba(4,7,10,.72);
-    white-space:pre;
-  }
+  #hud{top:0;left:0;right:0;bottom:0;font-size:12px;line-height:1.45;
+       text-shadow:0 0 6px rgba(125,255,196,.35)}
+  #hud .panel{position:absolute;padding:8px 10px;border:1px solid var(--dim);
+              background:rgba(4,7,10,.72);white-space:pre}
   #stats{top:10px;left:10px}
-  #help{top:10px;right:10px;text-align:left}
-  #crosshair{
-    position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
-    font-size:14px;opacity:.55;
-  }
+  #help{top:10px;right:10px}
+  #map{bottom:10px;left:10px;line-height:1.0;font-size:11px;letter-spacing:1px}
+  #crosshair{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;opacity:.5}
   .k{color:#ffe066}
   .muted{color:var(--dim)}
-
-  /* ---------- start screen ---------- */
-  #start{
-    position:fixed;inset:0;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;gap:18px;
-    background:radial-gradient(ellipse at center, rgba(8,16,20,.86), rgba(2,4,6,.97));
-    cursor:pointer;z-index:10;text-align:center;padding:20px;
-  }
-  #start pre{
-    margin:0;font-size:clamp(6px,1.35vw,15px);line-height:1.05;
-    color:var(--ink);text-shadow:0 0 12px rgba(125,255,196,.45);
-  }
+  #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+         justify-content:center;gap:18px;background:radial-gradient(ellipse at center,
+         rgba(8,16,20,.86), rgba(2,4,6,.97));cursor:pointer;z-index:10;text-align:center;padding:20px}
+  #start pre{margin:0;font-size:clamp(6px,1.35vw,15px);line-height:1.05;color:var(--ink);
+             text-shadow:0 0 12px rgba(125,255,196,.45)}
   #start .sub{font-size:13px;color:#9fe8ff;letter-spacing:.18em}
-  #start .cta{
-    font-size:15px;border:1px solid var(--ink);padding:10px 18px;
-    animation:blink 1.15s steps(2,start) infinite;
-  }
+  #start .cta{font-size:15px;border:1px solid var(--ink);padding:10px 18px;
+              animation:blink 1.15s steps(2,start) infinite}
   #start .keys{font-size:12px;color:var(--dim);line-height:1.7}
   @keyframes blink{50%{opacity:.25}}
-  #err{
-    position:fixed;inset:0;z-index:20;display:none;
-    align-items:center;justify-content:center;padding:30px;
-    background:#04070a;color:#ff7d7d;font-size:14px;white-space:pre-wrap;text-align:center;
-  }
+  #err{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+       padding:30px;background:#04070a;color:#ff7d7d;font-size:14px;white-space:pre-wrap;text-align:center}
 </style>
 </head>
 <body>
-<div id="wrap"><canvas id="gl"></canvas></div>
+<div id="wrap"><canvas id="screen"></canvas></div>
 
 <div id="hud" class="overlay">
   <div class="panel" id="stats"></div>
   <div class="panel" id="help"></div>
+  <div class="panel" id="map"></div>
   <div id="crosshair" class="overlay">+</div>
 </div>
 
 <div id="start">
   <pre id="title"></pre>
-  <div class="sub">PROTOTYPE 01 — WEBGL2 ASCII RENDERER</div>
+  <div class="sub">PROTOTYPE 02 — RAYCASTER ASCII, CIDADE INFINITA</div>
   <div class="cta">CLIQUE PARA ENTRAR NA CIDADE</div>
   <div class="keys">
     WASD mover · MOUSE olhar · SHIFT correr · ESC liberar cursor<br>
-    C cor · E contornos · X raw · V crt · [ ] tamanho do caractere · 1..4 charset · G nova cidade · H hud
+    C cor · L luz dinâmica · [ ] tamanho do caractere · 1..4 charset · G outro mundo · M mapa · H hud
   </div>
 </div>
 
@@ -96,977 +65,1079 @@
 <script>
 "use strict";
 /* =====================================================================
-   ASCII CITY — protótipo de jogo 3D renderizado inteiramente em ASCII.
+   ASCII CITY v2 — jogo 3D desenhado DIRETAMENTE em caracteres.
 
-   Pipeline (a técnica usada hoje em shaders de ASCII art, ex. Acerola):
-     1) a cena 3D é rasterizada normalmente em WebGL2 num framebuffer
-        offscreen, com MRT: alvo 0 = cor, alvo 1 = normal + máscara.
-     2) passe de bordas: Sobel sobre luminância + sobre o campo de normais
-        -> magnitude e ângulo da borda.
-     3) downsample para a grade de caracteres (1 texel = 1 caractere):
-        média de cor + histograma de direções de borda em 4 bins.
-     4) composição: cada célula escolhe um glifo de um atlas gerado em
-        runtime — rampa de densidade por luminância, ou | / - \ quando a
-        célula é dominada por uma borda direcional.
+   Não existe rasterização 3D por baixo: cada frame é um raycaster que
+   escreve num buffer de caracteres (um "terminal"), do mesmo jeito que
+   os engines de 1992 escreviam em modo texto. Só depois esse buffer de
+   glifos é blitado em ImageData. Nenhum WebGL, nenhum triângulo.
+
+     · DDA por coluna sobre uma malha de 1 m gerada sob demanda
+     · algoritmo do pintor (longe -> perto) para paredes de altura variável
+     · floor casting para o asfalto e as calçadas
+     · sprites (postes, árvores) com teste de profundidade por coluna
+     · iluminação pontual por célula: postes, outdoors e telões acendem
+       de verdade as superfícies em volta
+
+   A cidade é infinita e determinística: nada é armazenado além dos
+   quarteirões próximos, e o mesmo seed sempre produz a mesma metrópole.
    ===================================================================== */
 
 /* ------------------------------------------------------------------ */
-/* utilidades                                                          */
+/* 1. utilidades                                                       */
 /* ------------------------------------------------------------------ */
 
 function fail(msg){
   const e = document.getElementById("err");
-  e.style.display = "flex";
-  e.textContent = msg;
+  e.style.display = "flex"; e.textContent = msg;
   throw new Error(msg);
 }
+const clamp = (v,a,b) => v < a ? a : (v > b ? b : v);
+const lerp  = (a,b,t) => a + (b-a) * t;
+const smooth = t => t*t*(3-2*t);
 
-/** PRNG determinístico (mulberry32) — cidade reproduzível por seed. */
-function makeRng(seed){
-  let a = seed >>> 0;
-  return function(){
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+/** Hash inteiro 3D com boa avalanche — a base de tudo que é procedural.
+ *  Sem estado: qualquer coordenada pode ser consultada em O(1), o que é
+ *  o que permite a cidade ser infinita nos dois sentidos. */
+function hash3(x, y, z){
+  let n = Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1) ^ Math.imul(z | 0, 0x9e3779b1);
+  n ^= n >>> 15; n = Math.imul(n, 0x85ebca6b);
+  n ^= n >>> 13; n = Math.imul(n, 0xc2b2ae35);
+  n ^= n >>> 16;
+  return (n >>> 0) / 4294967296;
 }
 
-const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
-const lerp  = (a, b, t) => a + (b - a) * t;
-
 /* ------------------------------------------------------------------ */
-/* matemática de matrizes (column-major, estilo OpenGL)                */
-/* ------------------------------------------------------------------ */
-
-const M4 = {
-  identity(){ return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]); },
-
-  perspective(out, fovy, aspect, near, far){
-    const f = 1 / Math.tan(fovy / 2);
-    out.fill(0);
-    out[0]  = f / aspect;
-    out[5]  = f;
-    out[10] = (far + near) / (near - far);
-    out[11] = -1;
-    out[14] = (2 * far * near) / (near - far);
-    return out;
-  },
-
-  /** view a partir de posição + base ortonormal (right/up/forward). */
-  view(out, eye, right, up, fwd){
-    out[0] = right[0]; out[4] = right[1]; out[8]  = right[2];
-    out[1] = up[0];    out[5] = up[1];    out[9]  = up[2];
-    out[2] = -fwd[0];  out[6] = -fwd[1];  out[10] = -fwd[2];
-    out[3] = 0;        out[7] = 0;        out[11] = 0;
-    out[12] = -(right[0]*eye[0] + right[1]*eye[1] + right[2]*eye[2]);
-    out[13] = -(up[0]*eye[0]    + up[1]*eye[1]    + up[2]*eye[2]);
-    out[14] =  (fwd[0]*eye[0]   + fwd[1]*eye[1]   + fwd[2]*eye[2]);
-    out[15] = 1;
-    return out;
-  },
-
-  mul(out, a, b){
-    for (let c = 0; c < 4; c++){
-      const b0 = b[c*4], b1 = b[c*4+1], b2 = b[c*4+2], b3 = b[c*4+3];
-      out[c*4  ] = a[0]*b0 + a[4]*b1 + a[8]*b2  + a[12]*b3;
-      out[c*4+1] = a[1]*b0 + a[5]*b1 + a[9]*b2  + a[13]*b3;
-      out[c*4+2] = a[2]*b0 + a[6]*b1 + a[10]*b2 + a[14]*b3;
-      out[c*4+3] = a[3]*b0 + a[7]*b1 + a[11]*b2 + a[15]*b3;
-    }
-    return out;
-  }
-};
-
-/* ------------------------------------------------------------------ */
-/* geração da cidade                                                   */
+/* 2. parâmetros do traçado urbano                                     */
 /* ------------------------------------------------------------------ */
 /*
-   Layout: grade de quarteirões. Cada quarteirão tem LOT x LOT metros de
-   calçada, cercado por ruas de STREET metros. Dentro do lote nascem de 1
-   a 4 torres, cada uma com 2-3 volumes empilhados (setbacks), o que dá
-   um skyline com silhuetas variadas — que é o que o filtro de bordas
-   transforma em | / - \.
+   O traçado segue como se desenha um plano viário de verdade:
 
-   Tipos de material (atributo aMeta.x lido pelo fragment shader):
-     0 asfalto · 1 calçada · 2 fachada · 3 topo/laje · 4 neon emissivo
+     · a caixa da rua (right-of-way) tem largura FIXA — é o que dá a
+       leitura de cidade planejada; o que varia é o tamanho do miolo;
+     · os eixos de rua são uma sequência 1-D separável em X e em Z, com
+       jitter limitado: eixo(i) = i*MEDIA + ruído. Como o jitter é menor
+       que a média, a sequência é monotônica e cada eixo pode ser
+       calculado isolado, sem acumular desde a origem — é isso que torna
+       a malha infinita e ainda assim perfeitamente alinhada;
+     · a calçada é uma faixa de largura fixa medida para dentro do
+       quarteirão, então toda esquina fecha certo;
+     · o miolo é loteado por subdivisão binária recursiva, e os lotes se
+       encostam (paredes geminadas), como num quarteirão real.
 */
+const CFG = {
+  STREET_W:     12,    // caixa da rua, constante em toda a cidade (par!)
+  SIDEWALK_W:   3,     // calçada, medida para dentro do quarteirão
+  BLOCK_AVG:    46,    // distância média entre eixos de rua
+  BLOCK_JITTER: 18,    // variação do tamanho do quarteirão (< BLOCK_AVG)
+  LOT_MIN:      9,     // menor testada de lote
+  LOT_MAX:      19,    // acima disso o lote é subdividido
+  FLOOR_H:      3.15,  // pé-direito
+  FLOORS_MIN:   2,
+  FLOORS_MAX:   24,
+  LAMP_GAP_MIN: 10,    // vão mínimo entre postes
+  LAMP_GAP_MAX: 15,    // vão máximo entre postes
+  LAMP_H_MIN:   4.2,   // poste nunca é infinitamente alto
+  LAMP_H_MAX:   6.2,
+  EYE:          1.70,
+  FOG:          105,   // alcance de visão
+  LIGHT_R:      17     // raio máximo de uma luz (casa com o bucket)
+};
+const HALF_ST = CFG.STREET_W / 2;
 
-const STREET = 9;          // largura da rua
-const LOT    = 17;         // lado do quarteirão
-const BLOCK  = STREET + LOT;
-const GRIDN  = 9;          // quarteirões por eixo
-const WORLD  = GRIDN * BLOCK;
-const SIDEWALK_H = 0.22;
+let WSEED = 1337;
 
-class MeshBuilder {
-  constructor(){
-    this.data = [];        // pos(3) nrm(3) uv(2) meta(2: tipo, seed)
-    this.count = 0;
-  }
-  vert(px,py,pz, nx,ny,nz, u,v, t,s){
-    this.data.push(px,py,pz, nx,ny,nz, u,v, t,s);
-    this.count++;
-  }
-  /** quad a->b->c->d no sentido anti-horário visto de fora. */
-  quad(a,b,c,d, n, uva,uvb,uvc,uvd, t,s){
-    this.vert(a[0],a[1],a[2], n[0],n[1],n[2], uva[0],uva[1], t,s);
-    this.vert(b[0],b[1],b[2], n[0],n[1],n[2], uvb[0],uvb[1], t,s);
-    this.vert(c[0],c[1],c[2], n[0],n[1],n[2], uvc[0],uvc[1], t,s);
-    this.vert(a[0],a[1],a[2], n[0],n[1],n[2], uva[0],uva[1], t,s);
-    this.vert(c[0],c[1],c[2], n[0],n[1],n[2], uvc[0],uvc[1], t,s);
-    this.vert(d[0],d[1],d[2], n[0],n[1],n[2], uvd[0],uvd[1], t,s);
-  }
-  /**
-   * Caixa alinhada aos eixos. As UVs são coordenadas de mundo (em metros),
-   * então a malha de janelas continua alinhada de um volume para o outro.
-   */
-  box(x0,y0,z0, x1,y1,z1, sideType, topType, seed){
-    // +X
-    this.quad([x1,y0,z1],[x1,y0,z0],[x1,y1,z0],[x1,y1,z1], [1,0,0],
-              [z1,y0],[z0,y0],[z0,y1],[z1,y1], sideType, seed);
-    // -X
-    this.quad([x0,y0,z0],[x0,y0,z1],[x0,y1,z1],[x0,y1,z0], [-1,0,0],
-              [z0,y0],[z1,y0],[z1,y1],[z0,y1], sideType, seed);
-    // +Z
-    this.quad([x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1], [0,0,1],
-              [x0,y0],[x1,y0],[x1,y1],[x0,y1], sideType, seed);
-    // -Z
-    this.quad([x1,y0,z0],[x0,y0,z0],[x0,y1,z0],[x1,y1,z0], [0,0,-1],
-              [x1,y0],[x0,y0],[x0,y1],[x1,y1], sideType, seed);
-    // +Y (topo)
-    this.quad([x0,y1,z1],[x1,y1,z1],[x1,y1,z0],[x0,y1,z0], [0,1,0],
-              [x0,z1],[x1,z1],[x1,z0],[x0,z0], topType, seed);
-  }
-  toFloat32(){ return new Float32Array(this.data); }
+/* eixos de rua: inteiros, para a caixa da rua ficar exata em metros */
+function axisX(i){ return Math.round(i * CFG.BLOCK_AVG + (hash3(i, 7717, WSEED) - 0.5) * CFG.BLOCK_JITTER); }
+function axisZ(j){ return Math.round(j * CFG.BLOCK_AVG + (hash3(j, 3313, WSEED) - 0.5) * CFG.BLOCK_JITTER); }
+
+function idxX(x){
+  let i = Math.floor(x / CFG.BLOCK_AVG);
+  while (axisX(i) > x) i--;
+  while (axisX(i + 1) <= x) i++;
+  return i;
+}
+function idxZ(z){
+  let j = Math.floor(z / CFG.BLOCK_AVG);
+  while (axisZ(j) > z) j--;
+  while (axisZ(j + 1) <= z) j++;
+  return j;
 }
 
-/**
- * Constrói a geometria + os colisores da cidade.
- * @returns {{vertices:Float32Array, count:number, blockers:Float32Array,
- *            walks:Float32Array, spawn:[number,number]}}
- */
-function buildCity(seed){
-  const rnd = makeRng(seed);
-  const mb  = new MeshBuilder();
-  const blockers = [];   // x0,z0,x1,z1 (colisão) por caixa base
-  const walks    = [];   // x0,z0,x1,z1 (calçadas, para altura do chão)
+/** ruído de valor suave em coordenadas de quarteirão: cria distritos —
+ *  um centro adensado, bairros baixos, sem repetição visível. */
+function district(i, j){
+  const fi = i * 0.085, fj = j * 0.085;
+  const i0 = Math.floor(fi), j0 = Math.floor(fj);
+  const tx = smooth(fi - i0), tz = smooth(fj - j0);
+  const a = hash3(i0,   j0,   WSEED ^ 0x51), b = hash3(i0+1, j0,   WSEED ^ 0x51);
+  const c = hash3(i0,   j0+1, WSEED ^ 0x51), d = hash3(i0+1, j0+1, WSEED ^ 0x51);
+  return lerp(lerp(a, b, tx), lerp(c, d, tx), tz);
+}
 
-  // asfalto: um único quad cobrindo tudo (UV = coordenada de mundo)
-  mb.quad([0,0,WORLD],[WORLD,0,WORLD],[WORLD,0,0],[0,0,0], [0,1,0],
-          [0,WORLD],[WORLD,WORLD],[WORLD,0],[0,0], 0, 0);
+/* ------------------------------------------------------------------ */
+/* 3. quarteirões                                                      */
+/* ------------------------------------------------------------------ */
 
-  const cx = WORLD / 2, cz = WORLD / 2;
-  const maxD = Math.hypot(cx, cz);
+const NEON = [
+  [0.30, 1.00, 0.95], [1.00, 0.24, 0.72], [1.00, 0.72, 0.20],
+  [0.55, 0.45, 1.00], [0.35, 0.85, 1.00], [1.00, 0.42, 0.28],
+  [0.65, 1.00, 0.35]
+];
+const ADS = [
+  "SUSHI 24H", "NEON BAR", "RAMEN", "CYBER CAFE", "OPEN", "KARAOKE",
+  "NOODLES", "HOTEL", "PACHINKO", "TAXI", "DATA CLINIC", "VACANCY",
+  "BURGER", "CLUB 88", "PHARMA", "ARCADE", "COFFEE", "TATTOO"
+];
 
-  for (let gi = 0; gi < GRIDN; gi++){
-    for (let gj = 0; gj < GRIDN; gj++){
-      const ox = gi * BLOCK + STREET;
-      const oz = gj * BLOCK + STREET;
-
-      // calçada (laje baixa cobrindo o lote inteiro)
-      mb.box(ox, 0, oz, ox + LOT, SIDEWALK_H, oz + LOT, 1, 1, 0);
-      walks.push(ox, oz, ox + LOT, oz + LOT);
-
-      // densidade urbana: quanto mais perto do centro, mais alto
-      const d = Math.hypot(ox + LOT/2 - cx, oz + LOT/2 - cz) / maxD;
-      const downtown = Math.pow(1 - clamp(d, 0, 1), 1.6);
-
-      // praça ocasional (respiro no skyline, bom para ver a silhueta)
-      const isPlaza = rnd() < 0.07;
-      if (isPlaza){ addPlaza(mb, blockers, rnd, ox, oz); continue; }
-
-      // subdivide o lote em 1, 2 ou 4 torres
-      const split = rnd() < 0.42 ? 1 : (rnd() < 0.5 ? 2 : 4);
-      const sub = [];
-      const half = LOT / 2;
-      if (split === 1){
-        sub.push([ox, oz, LOT, LOT]);
-      } else if (split === 2){
-        if (rnd() < 0.5){ sub.push([ox, oz, half, LOT], [ox + half, oz, half, LOT]); }
-        else            { sub.push([ox, oz, LOT, half], [ox, oz + half, LOT, half]); }
-      } else {
-        sub.push([ox, oz, half, half], [ox + half, oz, half, half],
-                 [ox, oz + half, half, half], [ox + half, oz + half, half, half]);
-      }
-
-      for (const [sx, sz, sw, sd] of sub){
-        const inset = 0.9 + rnd() * 1.4;
-        let x0 = sx + inset, z0 = sz + inset;
-        let x1 = sx + sw - inset, z1 = sz + sd - inset;
-        if (x1 - x0 < 3 || z1 - z0 < 3) continue;
-
-        const baseH = 7 + rnd() * 9;
-        let h = baseH + downtown * (18 + rnd() * 46) + rnd() * 6;
-        const bseed = Math.floor(rnd() * 251);
-
-        blockers.push(x0, z0, x1, z1);
-
-        // volumes empilhados com recuo (setbacks)
-        const tiers = h > 34 ? 3 : (h > 18 ? 2 : 1);
-        let y = SIDEWALK_H, left = h;
-        for (let t = 0; t < tiers; t++){
-          const th = t === tiers - 1 ? left : Math.max(3, left * (0.42 + rnd() * 0.26));
-          mb.box(x0, y, z0, x1, y + th, z1, 2, 3, bseed + t * 7);
-          y += th; left -= th;
-          if (left < 3.5) break;
-          const shrink = 0.6 + rnd() * 1.2;
-          x0 += shrink; z0 += shrink; x1 -= shrink; z1 -= shrink;
-          if (x1 - x0 < 3 || z1 - z0 < 3) break;
-        }
-
-        addRoofProps(mb, rnd, x0, y, z0, x1, z1, bseed);
-        if (rnd() < 0.5) addNeonSign(mb, rnd, sx + inset, sz + inset,
-                                     sx + sw - inset, sz + sd - inset,
-                                     SIDEWALK_H, Math.min(y, SIDEWALK_H + h));
-      }
-
-      // postes de luz na esquina do quarteirão
-      if (rnd() < 0.75) addLamp(mb, ox + 0.9, oz + 0.9);
-      if (rnd() < 0.4)  addLamp(mb, ox + LOT - 0.9, oz + LOT - 0.9);
-    }
-  }
-
-  // muralha externa: impede o jogador de sair para o vazio
-  const W = WORLD, T = STREET * 0.55;
-  const walls = [[-T,-T,W+T,0], [-T,W,W+T,W+T], [-T,0,0,W], [W,0,W+T,W]];
-  for (const [x0,z0,x1,z1] of walls){
-    mb.box(x0, 0, z0, x1, 26, z1, 2, 3, 77);
-    blockers.push(x0, z0, x1, z1);
-  }
-
-  return {
-    vertices: mb.toFloat32(),
-    count: mb.count,
-    blockers: new Float32Array(blockers),
-    walks: new Float32Array(walks),
-    spawn: [STREET / 2, STREET / 2 + BLOCK]
+/* fonte matricial 5x7 — as letras dos letreiros são desenhadas em blocos,
+   como num painel de LED de verdade; de perto dá para ler, de longe vira
+   um borrão colorido, exatamente como acontece na rua. */
+const FONT57 = (() => {
+  const raw = {
+    A:"01110100011000111111100011000110001", B:"11110100011000111110100011000111110",
+    C:"01110100011000010000100001000101110", D:"11110100011000110001100011000111110",
+    E:"11111100001000011110100001000011111", F:"11111100001000011110100001000010000",
+    G:"01110100011000010111100011000101111", H:"10001100011000111111100011000110001",
+    I:"01110001000010000100001000010001110", J:"00111000100001000010000101001001100",
+    K:"10001100101010011000101001001010001", L:"10000100001000010000100001000011111",
+    M:"10001110111010110101100011000110001", N:"10001110011010110011100011000110001",
+    O:"01110100011000110001100011000101110", P:"11110100011000111110100001000010000",
+    Q:"01110100011000110001101011001001101", R:"11110100011000111110101001001010001",
+    S:"01111100001000001110000010000111110", T:"11111001000010000100001000010000100",
+    U:"10001100011000110001100011000101110", V:"10001100011000110001100010101000100",
+    W:"10001100011000110101101011101110001", X:"10001100010101000100010101000110001",
+    Y:"10001100010101000100001000010000100", Z:"11111000010001000100010001000011111",
+    "0":"01110100011001110101110011000101110", "1":"00100011000010000100001000010001110",
+    "2":"01110100010000100010001000100011111", "3":"11111000100010000010000011000101110",
+    "4":"00010001100101010010111110001000010", "5":"11111100001111000001000011000101110",
+    "6":"00110010001000011110100011000101110", "7":"11111000010001000100010000100001000",
+    "8":"01110100011000101110100011000101110", "9":"01110100011000101111000010001001100",
+    "-":"00000000000000011111000000000000000", ".":"00000000000000000000000001100001100",
+    "!":"00100001000010000100001000000000100", " ":"0".repeat(35)
   };
-}
+  const m = new Map();
+  for (const k in raw) m.set(k, Uint8Array.from(raw[k], c => c === "1" ? 1 : 0));
+  return m;
+})();
+const FONT_BLANK = FONT57.get(" ");
 
-/** praça: piso, alguns bancos/blocos e um totem de neon. */
-function addPlaza(mb, blockers, rnd, ox, oz){
-  const n = 2 + Math.floor(rnd() * 3);
-  for (let i = 0; i < n; i++){
-    const w = 1.4 + rnd() * 2.2, d = 1.4 + rnd() * 2.2;
-    const x = ox + 2 + rnd() * (LOT - 4 - w);
-    const z = oz + 2 + rnd() * (LOT - 4 - d);
-    const h = 0.8 + rnd() * 1.6;
-    mb.box(x, SIDEWALK_H, z, x + w, SIDEWALK_H + h, z + d, 2, 3, 12);
-    blockers.push(x, z, x + w, z + d);
+/** subdivisão binária recursiva do miolo do quarteirão em lotes que se
+ *  encostam — é assim que um quarteirão real é loteado. */
+function splitLots(x0, z0, x1, z1, depth, seed, out){
+  const w = x1 - x0, d = z1 - z0;
+  if (Math.max(w, d) <= CFG.LOT_MAX || depth >= 6 || out.length >= 40){
+    if (w >= 4 && d >= 4) out.push([x0, z0, x1, z1]);
+    return;
   }
-  const tx = ox + LOT/2 - 0.35, tz = oz + LOT/2 - 0.35;
-  mb.box(tx, SIDEWALK_H, tz, tx + 0.7, SIDEWALK_H + 7 + rnd()*4, tz + 0.7, 4, 4,
-         Math.floor(rnd()*4096));
-  blockers.push(tx, tz, tx + 0.7, tz + 0.7);
-}
-
-/** antenas e caixas d'água: linhas finas que viram '|' no filtro. */
-function addRoofProps(mb, rnd, x0, y, z0, x1, z1, seed){
-  if (rnd() < 0.55){
-    const w = 0.9 + rnd() * 1.8;
-    const px = lerp(x0, x1 - w, rnd()), pz = lerp(z0, z1 - w, rnd());
-    mb.box(px, y, pz, px + w, y + 1 + rnd() * 2, pz + w, 2, 3, seed);
+  const along = w >= d;
+  const len = along ? w : d;
+  const r = hash3(x0 * 31 + z0, len * 17 + depth, seed);
+  let cut = Math.round(len * (0.36 + 0.28 * r));
+  if (cut < CFG.LOT_MIN) cut = CFG.LOT_MIN;
+  if (len - cut < CFG.LOT_MIN) cut = len - CFG.LOT_MIN;
+  if (cut < CFG.LOT_MIN || len - cut < CFG.LOT_MIN){
+    if (w >= 4 && d >= 4) out.push([x0, z0, x1, z1]);
+    return;
   }
-  if (rnd() < 0.45){
-    const px = lerp(x0, x1, rnd()) - 0.12, pz = lerp(z0, z1, rnd()) - 0.12;
-    mb.box(px, y, pz, px + 0.24, y + 3 + rnd() * 7, pz + 0.24, 2, 3, seed);
-  }
-}
-
-/** letreiro vertical de neon colado na fachada. */
-function addNeonSign(mb, rnd, x0, z0, x1, z1, yBase, yTop){
-  const h = Math.min(4 + rnd() * 9, Math.max(2, yTop - yBase - 3));
-  if (h < 2.5) return;
-  const y = yBase + 2 + rnd() * Math.max(0.1, (yTop - yBase - h - 2));
-  const s = Math.floor(rnd() * 251);
-  const face = Math.floor(rnd() * 4);
-  const t = 0.28, w = 0.9 + rnd() * 0.7;
-  if (face === 0)      mb.box(x1, y, (z0+z1)/2 - w/2, x1 + t, y + h, (z0+z1)/2 + w/2, 4, 4, s);
-  else if (face === 1) mb.box(x0 - t, y, (z0+z1)/2 - w/2, x0, y + h, (z0+z1)/2 + w/2, 4, 4, s);
-  else if (face === 2) mb.box((x0+x1)/2 - w/2, y, z1, (x0+x1)/2 + w/2, y + h, z1 + t, 4, 4, s);
-  else                 mb.box((x0+x1)/2 - w/2, y, z0 - t, (x0+x1)/2 + w/2, y + h, z0, 4, 4, s);
-}
-
-/** poste com lâmpada emissiva no topo. */
-function addLamp(mb, x, z){
-  mb.box(x - 0.09, SIDEWALK_H, z - 0.09, x + 0.09, SIDEWALK_H + 4.6, z + 0.09, 2, 3, 5);
-  mb.box(x - 0.26, SIDEWALK_H + 4.6, z - 0.26, x + 0.26, SIDEWALK_H + 5.0, z + 0.26, 4, 4, 131);
-}
-
-/* ------------------------------------------------------------------ */
-/* shaders                                                             */
-/* ------------------------------------------------------------------ */
-
-const VS_FULLSCREEN = `#version 300 es
-out vec2 vUV;
-void main(){
-  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
-  vUV = p;
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
-}`;
-
-const GLSL_HASH = `
-float hash11(float p){
-  p = fract(p * 0.1031);
-  p *= p + 33.33;
-  p *= p + p;
-  return fract(p);
-}
-float hash21(vec2 p){
-  vec3 q = fract(vec3(p.xyx) * 0.1031);
-  q += dot(q, q.yzx + 33.33);
-  return fract((q.x + q.y) * q.z);
-}
-float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-`;
-
-/* ---- 1. céu (fullscreen, escrito antes da geometria) --------------- */
-const FS_SKY = `#version 300 es
-precision highp float;
-in vec2 vUV;
-layout(location = 0) out vec4 oColor;
-layout(location = 1) out vec4 oGeo;
-
-uniform vec3  uRight, uUp, uFwd;
-uniform float uTanHalf, uAspect, uTime;
-` + GLSL_HASH + `
-void main(){
-  vec2 ndc = vUV * 2.0 - 1.0;
-  vec3 dir = normalize(uFwd + uRight * (ndc.x * uAspect * uTanHalf) + uUp * (ndc.y * uTanHalf));
-
-  float h = clamp(dir.y, -1.0, 1.0);
-  // gradiente noturno: brilho de poluição luminosa junto ao horizonte
-  vec3 zenith  = vec3(0.010, 0.018, 0.036);
-  vec3 horizon = vec3(0.085, 0.055, 0.115);
-  vec3 col = mix(horizon, zenith, clamp(pow(max(h, 0.0), 0.42), 0.0, 1.0));
-  col += vec3(0.10, 0.045, 0.02) * pow(max(1.0 - abs(h) * 3.2, 0.0), 3.0);
-
-  // estrelas: grade em coordenadas esféricas, ponto pequeno dentro da célula
-  if (h > 0.03){
-    vec2 sph = vec2(atan(dir.z, dir.x), acos(clamp(h, -1.0, 1.0)));
-    vec2 g   = sph * 46.0;
-    vec2 id  = floor(g);
-    vec2 f   = fract(g) - 0.5;
-    float s  = hash21(id);
-    if (s > 0.965){
-      float tw   = 0.55 + 0.45 * sin(uTime * 2.0 + s * 90.0);
-      float dot_ = smoothstep(0.16, 0.0, length(f));
-      col += vec3(0.42, 0.58, 0.72) * dot_ * tw * smoothstep(0.03, 0.22, h);
-    }
-  }
-  if (h < 0.0) col = mix(vec3(0.03, 0.025, 0.045), col, exp(h * 9.0));
-
-  oColor = vec4(col, 1.0);
-  oGeo   = vec4(0.5, 0.5, 0.5, 0.0);   // a = 0 -> não é geometria
-}`;
-
-/* ---- 2. cena 3D ---------------------------------------------------- */
-const VS_SCENE = `#version 300 es
-in vec3 aPos;
-in vec3 aNrm;
-in vec2 aUV;
-in vec2 aMeta;
-
-uniform mat4 uVP;
-uniform vec3 uEye;
-
-out vec3 vNrm;
-out vec2 vUV;
-flat out vec2 vMeta;
-out float vDist;
-
-void main(){
-  vNrm  = aNrm;
-  vUV   = aUV;
-  vMeta = aMeta;
-  vDist = length(aPos - uEye);
-  gl_Position = uVP * vec4(aPos, 1.0);
-}`;
-
-const FS_SCENE = `#version 300 es
-precision highp float;
-in vec3 vNrm;
-in vec2 vUV;
-flat in vec2 vMeta;
-in float vDist;
-
-layout(location = 0) out vec4 oColor;
-layout(location = 1) out vec4 oGeo;
-
-uniform float uTime, uFog, uBlock, uStreet;
-` + GLSL_HASH + `
-
-vec3 neonPalette(float s){
-  float k = hash11(s * 1.7 + 3.1);
-  if (k < 0.30) return vec3(0.25, 1.00, 0.95);   // ciano
-  if (k < 0.55) return vec3(1.00, 0.25, 0.75);   // magenta
-  if (k < 0.75) return vec3(1.00, 0.72, 0.18);   // âmbar
-  if (k < 0.90) return vec3(0.55, 0.45, 1.00);   // violeta
-  return vec3(0.90, 0.98, 1.00);                 // branco frio
-}
-
-void main(){
-  int   type = int(vMeta.x + 0.5);
-  float seed = vMeta.y;
-  vec3  N    = normalize(vNrm);
-
-  vec3 albedo   = vec3(0.06);
-  vec3 emissive = vec3(0.0);
-
-  if (type == 0){
-    // asfalto + faixas centrais tracejadas nas ruas
-    albedo = vec3(0.105, 0.110, 0.126);
-    float mx = mod(vUV.x, uBlock);
-    float mz = mod(vUV.y, uBlock);
-    float half_ = uStreet * 0.5;
-    float dashZ = step(0.5, fract(vUV.y * 0.22));
-    float dashX = step(0.5, fract(vUV.x * 0.22));
-    float lineZ = (1.0 - smoothstep(0.06, 0.16, abs(mx - half_))) * dashZ;
-    float lineX = (1.0 - smoothstep(0.06, 0.16, abs(mz - half_))) * dashX;
-    albedo += vec3(0.95, 0.88, 0.62) * max(lineZ, lineX);
-
-  } else if (type == 1){
-    // calçada com juntas a cada 2 m
-    albedo = vec3(0.150, 0.156, 0.180);
-    vec2 t = abs(fract(vUV * 0.5) - 0.5);
-    float joint = 1.0 - smoothstep(0.40, 0.49, max(t.x, t.y));
-    albedo *= mix(0.45, 1.0, joint);
-
-  } else if (type == 2){
-    // fachada: concreto escuro + malha de janelas acesas
-    albedo = vec3(0.30, 0.31, 0.38) * (0.70 + 0.6 * hash11(seed));
-    // oclusão barata: a base do prédio é mais escura que o topo
-    albedo *= mix(0.45, 1.0, smoothstep(0.0, 9.0, vUV.y));
-    vec2 pitch = vec2(2.3, 3.1);
-    vec2 cell  = floor(vUV / pitch);
-    vec2 f     = fract(vUV / pitch);
-    float inWin = step(0.16, f.x) * step(f.x, 0.84) * step(0.22, f.y) * step(f.y, 0.80);
-    float r = hash21(cell + seed * 0.37);
-    float on = step(0.46, r);
-    // um punhado de janelas pisca / muda de estado devagar
-    float flick = step(0.985, hash21(cell + floor(uTime * 2.0) * 0.11 + seed));
-    on = clamp(on - flick, 0.0, 1.0);
-    vec3 wc = mix(vec3(1.00, 0.85, 0.55), neonPalette(seed + cell.x * 0.13 + cell.y * 0.29),
-                  step(0.72, hash21(cell * 1.31 + seed)));
-    emissive += wc * inWin * on * (0.75 + 0.75 * hash21(cell + 7.0));
-    albedo   *= mix(1.0, 0.55, inWin * (1.0 - on));   // janela apagada = buraco escuro
-
-  } else if (type == 3){
-    // laje / topo
-    albedo = vec3(0.20, 0.21, 0.25);
-    albedo *= 0.85 + 0.3 * hash21(floor(vUV * 0.8));
-
+  if (along){
+    splitLots(x0, z0, x0 + cut, z1, depth + 1, seed, out);
+    splitLots(x0 + cut, z0, x1, z1, depth + 1, seed, out);
   } else {
-    // neon puro (letreiros, totens, lâmpadas)
-    vec3 c = neonPalette(seed);
-    float pulse = 0.75 + 0.25 * sin(uTime * (1.4 + hash11(seed) * 3.0) + seed);
-    emissive = c * 2.4 * pulse;
-    albedo = c * 0.25;
+    splitLots(x0, z0, x1, z0 + cut, depth + 1, seed, out);
+    splitLots(x0, z0 + cut, x1, z1, depth + 1, seed, out);
   }
+}
 
-  // iluminação noturna: key fraca + céu + rebote quente das ruas
-  // key bem lateral: faces +X/+Z acendem e -X/-Z ficam escuras, então cada
-  // quina do prédio vira um salto de densidade na rampa de caracteres
-  vec3 L = normalize(vec3(0.62, 0.52, 0.58));
-  float ndl = max(dot(N, L), 0.0);
-  float skyT = 0.5 + 0.5 * N.y;
-  vec3 lit = albedo * (vec3(0.13, 0.17, 0.30) * skyT
-                     + vec3(0.62, 0.64, 0.74) * ndl
-                     + vec3(0.30, 0.14, 0.07) * (1.0 - skyT) * 0.5);
-  vec3 col = lit + emissive;
-
-  // névoa exponencial: o que está longe vira "espaço" na grade ASCII
-  float fog = 1.0 - exp(-pow(vDist * uFog, 2.0));
-  col = mix(col, vec3(0.020, 0.018, 0.034), clamp(fog, 0.0, 1.0));
-
-  oColor = vec4(col, 1.0);
-  oGeo   = vec4(N * 0.5 + 0.5, 1.0);
-}`;
-
-/* ---- 3. detecção de bordas (Sobel em luminância + normais) --------- */
-const FS_EDGE = `#version 300 es
-precision highp float;
-in vec2 vUV;
-out vec4 oEdge;
-
-uniform sampler2D uColor;
-uniform sampler2D uGeo;
-uniform vec2  uTexel;
-uniform float uLumaW, uNormalW;
-` + GLSL_HASH + `
-
-const float PI = 3.14159265359;
-
-void main(){
-  float l[9];
-  float n[9];
-  for (int j = -1; j <= 1; j++){
-    for (int i = -1; i <= 1; i++){
-      vec2 uv = vUV + vec2(float(i), float(j)) * uTexel;
-      int  k  = (j + 1) * 3 + (i + 1);
-      l[k] = luma(texture(uColor, uv).rgb);
-      vec4 g = texture(uGeo, uv);
-      // campo escalar que salta em quinas e em silhuetas contra o céu
-      vec3 nn = g.rgb * 2.0 - 1.0;
-      n[k] = g.a * (0.30 + 0.70 * (dot(normalize(nn + 1e-5), normalize(vec3(0.6, 0.5, 0.62))) * 0.5 + 0.5));
-    }
+/** postes ao longo de uma testada: vão constante dentro da testada e
+ *  sorteado dentro de [GAP_MIN, GAP_MAX] — nunca colados, nunca ralos. */
+function lampsAlong(out, fixed, a0, a1, horizontal, seed, blk){
+  const len = a1 - a0;
+  if (len < 4) return;
+  const target = CFG.LAMP_GAP_MIN + hash3(seed, 991, WSEED) * (CFG.LAMP_GAP_MAX - CFG.LAMP_GAP_MIN);
+  let n = Math.max(1, Math.round(len / target));
+  let step = len / n;
+  // corrige a contagem até o vão cair de fato dentro da faixa permitida
+  while (step > CFG.LAMP_GAP_MAX && n < 16){ n++; step = len / n; }
+  while (step < CFG.LAMP_GAP_MIN && n > 1){ n--; step = len / n; }
+  const phase = 0.5;                          // meio do intervalo, some das esquinas
+  for (let k = 0; k < n; k++){
+    const t = a0 + (k + phase) * step;
+    const h = CFG.LAMP_H_MIN + hash3(seed + k, 77, WSEED) * (CFG.LAMP_H_MAX - CFG.LAMP_H_MIN);
+    const warm = hash3(seed + k, 78, WSEED) < 0.72;
+    out.push({
+      x: horizontal ? t : fixed,
+      z: horizontal ? fixed : t,
+      h,
+      r: warm ? 1.00 : 0.55, g: warm ? 0.80 : 0.95, b: warm ? 0.48 : 1.00
+    });
   }
+}
 
-  // Sobel
-  float lx = (l[2] + 2.0 * l[5] + l[8]) - (l[0] + 2.0 * l[3] + l[6]);
-  float ly = (l[6] + 2.0 * l[7] + l[8]) - (l[0] + 2.0 * l[1] + l[2]);
-  float nx = (n[2] + 2.0 * n[5] + n[8]) - (n[0] + 2.0 * n[3] + n[6]);
-  float ny = (n[6] + 2.0 * n[7] + n[8]) - (n[0] + 2.0 * n[1] + n[2]);
+const blockCache = new Map();
+const blockOrder = [];
 
-  float ml = length(vec2(lx, ly)) * uLumaW;
-  float mn = length(vec2(nx, ny)) * uNormalW;
+function makeBlock(i, j){
+  const x0 = axisX(i) + HALF_ST, x1 = axisX(i + 1) - HALF_ST;
+  const z0 = axisZ(j) + HALF_ST, z1 = axisZ(j + 1) - HALF_ST;
+  const w = x1 - x0, d = z1 - z0;
+  const seed = (Math.imul(i, 73856093) ^ Math.imul(j, 19349663) ^ WSEED) | 0;
 
-  vec2  grad = ml >= mn ? vec2(lx, ly) : vec2(nx, ny);
-  float mag  = max(ml, mn);
+  const B = {
+    i, j, x0, z0, x1, z1, w, d,
+    height: new Uint8Array(w * d),
+    lotId:  new Uint8Array(w * d),
+    lots: [], lamps: [], bbs: [], lights: [], trees: [],
+    park: false
+  };
 
-  // direção do traço = perpendicular ao gradiente, quantizada em 4 bins:
-  //   0 '-'  ·  1 '/'  ·  2 '|'  ·  3 '\\'
-  float ang = atan(grad.y, grad.x) + PI * 0.5;
-  float bin = mod(floor((ang + PI / 8.0) / (PI / 4.0)), 4.0);
+  /* miolo edificável = quarteirão menos a calçada */
+  const bx0 = x0 + CFG.SIDEWALK_W, bx1 = x1 - CFG.SIDEWALK_W;
+  const bz0 = z0 + CFG.SIDEWALK_W, bz1 = z1 - CFG.SIDEWALK_W;
 
-  oEdge = vec4(l[4], clamp(mag, 0.0, 1.0), (bin + 0.5) / 4.0, 1.0);
-}`;
+  const dist = district(i, j);
+  B.park = hash3(i, j, WSEED ^ 0xBEEF) < 0.09 || (bx1 - bx0 < 6 || bz1 - bz0 < 6);
 
-/* ---- 4. downsample para a grade de caracteres --------------------- */
-const FS_GRID = `#version 300 es
-precision highp float;
-out vec4 oCell;
+  if (!B.park){
+    const rects = [];
+    splitLots(bx0, bz0, bx1, bz1, 0, seed, rects);
 
-uniform sampler2D uColor;
-uniform sampler2D uEdge;
-uniform int   uCell;
-uniform float uEdgeThresh;   // magnitude mínima por pixel
-uniform float uCoverage;     // fração mínima da célula para virar traço
+    rects.forEach((r, k) => {
+      const [lx0, lz0, lx1, lz1] = r;
+      const rh = hash3(lx0 * 7 + k, lz0 * 13, seed);
+      // altura: distrito define o patamar, o lote varia em torno dele
+      const d2 = clamp((dist - 0.22) / 0.62, 0, 1);
+      const base = Math.pow(d2, 1.5);
+      let floors = Math.round(lerp(CFG.FLOORS_MIN, CFG.FLOORS_MAX, base * (0.35 + 0.65 * rh)));
+      if (hash3(k, 9, seed) < 0.07)                       // torre isolada
+        floors = Math.round(floors * (1.9 + 1.5 * hash3(k, 10, seed)) + 6);
+      if (hash3(k, 5, seed) < 0.10) floors = Math.max(1, Math.round(floors * 0.22)); // térreo comercial
+      floors = clamp(floors, 1, CFG.FLOORS_MAX);
+      const h = Math.min(254, Math.round(floors * CFG.FLOOR_H));
 
-const int MAXC = 24;
+      const lot = {
+        x0: lx0, z0: lz0, x1: lx1, z1: lz1, h, floors,
+        uid: (hash3(lx0, lz0, seed ^ 0x5AF) * 32000) | 0,
+        seed: (seed + k * 131) | 0,
+        tone: 0.72 + 0.5 * hash3(k, 21, seed)
+      };
+      B.lots.push(lot);
 
-void main(){
-  ivec2 base = ivec2(gl_FragCoord.xy) * uCell;
-  vec3  sum  = vec3(0.0);
-  vec4  hist = vec4(0.0);
-  float n    = 0.0;
-
-  for (int y = 0; y < MAXC; y++){
-    if (y >= uCell) break;
-    for (int x = 0; x < MAXC; x++){
-      if (x >= uCell) break;
-      ivec2 p = base + ivec2(x, y);
-      sum += texelFetch(uColor, p, 0).rgb;
-      vec4 e = texelFetch(uEdge, p, 0);
-      if (e.y > uEdgeThresh){
-        int b = int(floor(e.z * 4.0));
-        float w = e.y;
-        hist += vec4(b == 0 ? w : 0.0, b == 1 ? w : 0.0,
-                     b == 2 ? w : 0.0, b == 3 ? w : 0.0);
+      const id = B.lots.length;                       // 0 = vazio
+      for (let tz = lz0; tz < lz1; tz++){
+        const row = (tz - z0) * w;
+        for (let tx = lx0; tx < lx1; tx++){
+          B.height[row + (tx - x0)] = h;
+          B.lotId[row + (tx - x0)]  = id;
+        }
       }
-      n += 1.0;
+      addBillboards(B, lot, bx0, bz0, bx1, bz1);
+    });
+  } else {
+    // praça: bancos e canteiros baixos + arborização
+    const n = 3 + Math.floor(hash3(i, j, seed) * 4);
+    for (let k = 0; k < n; k++){
+      const tw = 2 + Math.floor(hash3(k, 1, seed) * 3);
+      const td = 2 + Math.floor(hash3(k, 2, seed) * 3);
+      const px = Math.floor(lerp(bx0, bx1 - tw, hash3(k, 3, seed)));
+      const pz = Math.floor(lerp(bz0, bz1 - td, hash3(k, 4, seed)));
+      const h  = 1 + Math.floor(hash3(k, 5, seed) * 2);
+      for (let tz = pz; tz < pz + td; tz++)
+        for (let tx = px; tx < px + tw; tx++)
+          if (tx >= x0 && tx < x1 && tz >= z0 && tz < z1) B.height[(tz - z0) * w + (tx - x0)] = h;
+    }
+    const nt = 4 + Math.floor(hash3(i, j, seed ^ 9) * 6);
+    for (let k = 0; k < nt; k++){
+      B.trees.push({
+        x: lerp(bx0 + 1, bx1 - 1, hash3(k, 11, seed)),
+        z: lerp(bz0 + 1, bz1 - 1, hash3(k, 12, seed)),
+        h: 4.5 + hash3(k, 13, seed) * 3.5
+      });
     }
   }
 
-  vec3 avg = sum / max(n, 1.0);
+  /* postes: nas quatro testadas, no eixo da calçada */
+  const s = CFG.SIDEWALK_W / 2;
+  lampsAlong(B.lamps, z0 + s, x0 + 3, x1 - 3, true,  seed ^ 1, B);
+  lampsAlong(B.lamps, z1 - s, x0 + 3, x1 - 3, true,  seed ^ 2, B);
+  lampsAlong(B.lamps, x0 + s, z0 + 3, z1 - 3, false, seed ^ 3, B);
+  lampsAlong(B.lamps, x1 - s, z0 + 3, z1 - 3, false, seed ^ 4, B);
 
-  float best = max(max(hist.x, hist.y), max(hist.z, hist.w));
-  float idx  = 0.0;
-  if (best == hist.y) idx = 1.0;
-  if (best == hist.z) idx = 2.0;
-  if (best == hist.w) idx = 3.0;
-
-  float edge = (best / max(n, 1.0)) > uCoverage ? (idx + 1.0) / 8.0 : 0.0;
-  oCell = vec4(avg, edge);
-}`;
-
-/* ---- 5. composição ASCII ------------------------------------------ */
-const FS_ASCII = `#version 300 es
-precision highp float;
-in vec2 vUV;
-out vec4 oFrag;
-
-uniform sampler2D uGridTex;
-uniform sampler2D uAtlas;
-uniform sampler2D uScene;
-uniform vec2  uGrid;         // (colunas, linhas)
-uniform float uAtlasN, uRampN;
-uniform float uColorMode, uEdgesOn, uRaw, uCrt;
-uniform float uGamma, uExposure, uLevels, uBlack;
-uniform vec3  uTint, uBg;
-` + GLSL_HASH + `
-
-void main(){
-  if (uRaw > 0.5){ oFrag = vec4(texture(uScene, vUV).rgb, 1.0); return; }
-
-  vec2 g     = vUV * uGrid;
-  vec2 cell  = floor(g);
-  vec2 local = fract(g);
-
-  vec4 d = texture(uGridTex, (cell + 0.5) / uGrid);
-  // tonemap exponencial + gamma: a cena noturna ocupa a rampa inteira em vez
-  // de amontoar tudo no primeiro caractere
-  float lin = max(luma(d.rgb) - uBlack, 0.0) / max(1.0 - uBlack, 0.001);
-  float l = pow(1.0 - exp(-lin * uExposure), uGamma);
-
-  int  e = int(d.a * 8.0 + 0.5);
-  bool isEdge = (uEdgesOn > 0.5) && (e > 0);
-
-  float gi = isEdge ? (uRampN + float(e - 1))
-                    : floor(clamp(l, 0.0, 0.9999) * uRampN);
-
-  vec2 auv = vec2((gi + local.x) / uAtlasN, 1.0 - local.y);
-  float a = texture(uAtlas, auv).r;
-
-  float bright = isEdge ? max(l, 0.62) : l;
-
-  vec3 col;
-  if (uColorMode > 0.5){
-    float m = max(d.r, max(d.g, d.b));
-    vec3 hue = m > 0.0008 ? d.rgb / m : vec3(0.55, 0.85, 1.0);
-    hue = mix(vec3(0.62, 0.86, 1.0), hue, clamp(m * 6.0, 0.0, 1.0));
-    col = hue * (0.34 + 0.66 * bright);
-    col = floor(col * (uLevels - 1.0) + 0.5) / (uLevels - 1.0);
-  } else {
-    col = uTint * (0.26 + 0.74 * bright);
+  /* lista de luzes do quarteirão (consumida pela grade de luzes) */
+  for (const L of B.lamps){
+    B.lights.push({ x: L.x, y: L.h, z: L.z, r: L.r, g: L.g, b: L.b, rad: 13, inten: 1.15 });
   }
-
-  vec3 outc = mix(uBg, col, a);
-
-  if (uCrt > 0.5){
-    float scan = 1.0 - 0.16 * step(0.5, fract(gl_FragCoord.y * 0.5));
-    vec2  q = vUV - 0.5;
-    float vig = 1.0 - 0.85 * dot(q, q);
-    outc *= scan * vig;
+  for (const bb of B.bbs){
+    const cx = bb.axis === 0 ? bb.plane + bb.nrm * 0.6 : (bb.u0 + bb.u1) / 2;
+    const cz = bb.axis === 0 ? (bb.u0 + bb.u1) / 2 : bb.plane + bb.nrm * 0.6;
+    const area = (bb.u1 - bb.u0) * (bb.y1 - bb.y0);
+    B.lights.push({
+      x: cx, y: (bb.y0 + bb.y1) / 2, z: cz,
+      r: bb.r, g: bb.g, b: bb.b,
+      rad: clamp(6 + area * 0.22, 8, CFG.LIGHT_R),
+      inten: clamp(0.5 + area * 0.02, 0.6, 2.2),
+      bb
+    });
   }
-  oFrag = vec4(outc, 1.0);
-}`;
-
-/* ------------------------------------------------------------------ */
-/* contexto WebGL2 + helpers                                           */
-/* ------------------------------------------------------------------ */
-
-const canvas = document.getElementById("gl");
-const gl = canvas.getContext("webgl2", {
-  antialias: false, depth: true, alpha: false,
-  powerPreference: "high-performance", preserveDrawingBuffer: false
-});
-if (!gl) fail("Este protótipo precisa de WebGL2.\nUse Chrome/Edge/Firefox atualizado com aceleração de hardware ligada.");
-
-function compile(src, kind){
-  const sh = gl.createShader(kind);
-  gl.shaderSource(sh, src);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
-    fail("Erro de compilação do shader:\n\n" + gl.getShaderInfoLog(sh));
-  }
-  return sh;
+  return B;
 }
 
-function program(vsSrc, fsSrc){
-  const p = gl.createProgram();
-  gl.attachShader(p, compile(vsSrc, gl.VERTEX_SHADER));
-  gl.attachShader(p, compile(fsSrc, gl.FRAGMENT_SHADER));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) fail("Erro de link:\n\n" + gl.getProgramInfoLog(p));
-  const u = {};
-  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
-  for (let i = 0; i < n; i++){
-    const name = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, "");
-    u[name] = gl.getUniformLocation(p, name);
+/** outdoor/telão numa fachada que dá para a rua. */
+function addBillboards(B, lot, bx0, bz0, bx1, bz1){
+  if (lot.h < 7) return;
+  const faces = [];
+  if (lot.x0 === bx0) faces.push({ axis: 0, plane: lot.x0, nrm: -1, a: lot.z0, b: lot.z1 });
+  if (lot.x1 === bx1) faces.push({ axis: 0, plane: lot.x1, nrm:  1, a: lot.z0, b: lot.z1 });
+  if (lot.z0 === bz0) faces.push({ axis: 1, plane: lot.z0, nrm: -1, a: lot.x0, b: lot.x1 });
+  if (lot.z1 === bz1) faces.push({ axis: 1, plane: lot.z1, nrm:  1, a: lot.x0, b: lot.x1 });
+  if (!faces.length) return;
+
+  const nBB = hash3(lot.seed, 42, WSEED) < 0.30 ? 2 : (hash3(lot.seed, 43, WSEED) < 0.62 ? 1 : 0);
+  for (let k = 0; k < nBB && k < faces.length; k++){
+    const f = faces[(k + Math.floor(hash3(lot.seed, 44 + k, WSEED) * faces.length)) % faces.length];
+    const span = f.b - f.a;
+    if (span < 5) continue;
+
+    const wBB = Math.min(span - 1.5, 7 + hash3(lot.seed, 45 + k, WSEED) * 10);
+    const u0 = f.a + (span - wBB) * (0.15 + 0.7 * hash3(lot.seed, 46 + k, WSEED));
+    const screen = hash3(lot.seed, 47 + k, WSEED) < 0.40;
+    const hBB = screen ? 4.0 + hash3(lot.seed, 48 + k, WSEED) * 5.0
+                       : 3.2 + hash3(lot.seed, 49 + k, WSEED) * 2.6;
+    const yTop = Math.min(lot.h - 1.0, 5 + hash3(lot.seed, 50 + k, WSEED) * (lot.h - 7));
+    const y0 = yTop - hBB;
+    if (y0 < 3.2) continue;
+
+    const c = NEON[Math.floor(hash3(lot.seed, 51 + k, WSEED) * NEON.length) % NEON.length];
+    B.bbs.push({
+      axis: f.axis, plane: f.plane, nrm: f.nrm,
+      u0, u1: u0 + wBB, y0, y1: yTop,
+      screen,
+      r: c[0], g: c[1], b: c[2],
+      text: ADS[Math.floor(hash3(lot.seed, 52 + k, WSEED) * ADS.length) % ADS.length],
+      phase: hash3(lot.seed, 53 + k, WSEED) * 10,
+      speed: 0.6 + hash3(lot.seed, 54 + k, WSEED) * 1.6
+    });
   }
-  return { p, u };
 }
 
-const P_SKY   = program(VS_FULLSCREEN, FS_SKY);
-const P_SCENE = program(VS_SCENE,      FS_SCENE);
-const P_EDGE  = program(VS_FULLSCREEN, FS_EDGE);
-const P_GRID  = program(VS_FULLSCREEN, FS_GRID);
-const P_ASCII = program(VS_FULLSCREEN, FS_ASCII);
+function getBlock(i, j){
+  const key = i + "," + j;
+  let B = blockCache.get(key);
+  if (B) return B;
+  B = makeBlock(i, j);
+  blockCache.set(key, B);
+  blockOrder.push(key);
+  if (blockOrder.length > 220){                  // descarta os mais antigos
+    for (let k = 0; k < 40; k++) blockCache.delete(blockOrder.shift());
+  }
+  return B;
+}
+function resetCity(){ blockCache.clear(); blockOrder.length = 0; memoReset(); }
 
-function tex2D(w, h, filter){
-  const t = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return t;
+/* Consultas de mundo. O memo guarda a CÉLULA DA MALHA inteira — do eixo
+   de rua i ao eixo i+1 — e não só o quarteirão: assim os dezenas de
+   passos que o raio dá dentro da rua também acertam o cache. */
+let mAX0 = 1, mAX1 = 0, mAZ0 = 1, mAZ1 = 0, mBlk = null;
+function memoReset(){ mAX0 = 1; mAX1 = 0; mAZ0 = 1; mAZ1 = 0; mBlk = null; }
+
+function cellFor(tx, tz){
+  if (tx < mAX0 || tx >= mAX1 || tz < mAZ0 || tz >= mAZ1){
+    const i = idxX(tx), j = idxZ(tz);
+    mAX0 = axisX(i); mAX1 = axisX(i + 1);
+    mAZ0 = axisZ(j); mAZ1 = axisZ(j + 1);
+    mBlk = getBlock(i, j);
+  }
+  return mBlk;
+}
+function blockAtTile(tx, tz){
+  const B = cellFor(tx, tz);
+  return (tx >= B.x0 && tx < B.x1 && tz >= B.z0 && tz < B.z1) ? B : null;
+}
+function heightAtTile(tx, tz){
+  const B = cellFor(tx, tz);
+  if (tx < B.x0 || tx >= B.x1 || tz < B.z0 || tz >= B.z1) return 0;   // rua
+  return B.height[(tz - B.z0) * B.w + (tx - B.x0)];
 }
 
 /* ------------------------------------------------------------------ */
-/* atlas de glifos gerado em runtime (canvas 2D -> textura)            */
+/* 4. grade de luzes + sombreamento                                    */
 /* ------------------------------------------------------------------ */
+/*  Cada poste, outdoor e telão é uma luz pontual de verdade. Para não
+    testar todas contra cada célula, elas entram numa grade uniforme com
+    célula do tamanho do raio máximo: aí basta varrer os 3x3 buckets em
+    volta do ponto para ter todas as luzes que podem alcançá-lo.        */
+
+const LG_N = 24, LG_S = CFG.LIGHT_R;
+const lgBuckets = new Array(LG_N * LG_N);
+for (let k = 0; k < lgBuckets.length; k++) lgBuckets[k] = [];
+let lgOx = 0, lgOz = 0, lgKey = "";
+
+function rebuildLights(px, pz){
+  const bi = idxX(px), bj = idxZ(pz);
+  const key = bi + "," + bj;
+  if (key === lgKey) return;
+  lgKey = key;
+
+  lgOx = Math.floor(px / LG_S) - (LG_N >> 1);
+  lgOz = Math.floor(pz / LG_S) - (LG_N >> 1);
+  for (let k = 0; k < lgBuckets.length; k++) lgBuckets[k].length = 0;
+
+  for (let dj = -3; dj <= 3; dj++){
+    for (let di = -3; di <= 3; di++){
+      const B = getBlock(bi + di, bj + dj);
+      for (let n = 0; n < B.lights.length; n++){
+        const L = B.lights[n];
+        const cx = Math.floor(L.x / LG_S) - lgOx;
+        const cz = Math.floor(L.z / LG_S) - lgOz;
+        if (cx < 0 || cz < 0 || cx >= LG_N || cz >= LG_N) continue;
+        lgBuckets[cz * LG_N + cx].push(L);
+      }
+    }
+  }
+}
+
+let sR = 0, sG = 0, sB = 0;
+let lightsOn = true;
+
+const AMB = [0.030, 0.038, 0.068];    // céu noturno
+const BOUNCE = [0.058, 0.032, 0.018]; // rebote quente da cidade, vindo de baixo
+const KEYD = [0.55, 0.62, 0.56];      // "lua": direção fixa, já normalizada
+const KEYC = [0.085, 0.098, 0.140];
+
+function shade(px, py, pz, nx, ny, nz){
+  const up = 0.5 + 0.5 * ny;
+  sR = AMB[0] * up + BOUNCE[0] * (1 - up);
+  sG = AMB[1] * up + BOUNCE[1] * (1 - up);
+  sB = AMB[2] * up + BOUNCE[2] * (1 - up);
+  const kd = nx * KEYD[0] + ny * KEYD[1] + nz * KEYD[2];
+  if (kd > 0){ sR += KEYC[0] * kd; sG += KEYC[1] * kd; sB += KEYC[2] * kd; }
+  if (!lightsOn) return;
+
+  const cx = Math.floor(px / LG_S) - lgOx;
+  const cz = Math.floor(pz / LG_S) - lgOz;
+  if (cx < 1 || cz < 1 || cx >= LG_N - 1 || cz >= LG_N - 1) return;
+
+  for (let jz = cz - 1; jz <= cz + 1; jz++){
+    for (let jx = cx - 1; jx <= cx + 1; jx++){
+      const arr = lgBuckets[jz * LG_N + jx];
+      for (let n = 0; n < arr.length; n++){
+        const L = arr[n];
+        const dx = L.x - px, dy = L.y - py, dz = L.z - pz;
+        const d2 = dx*dx + dy*dy + dz*dz;
+        const rad = L.rad;
+        if (d2 >= rad * rad) continue;
+        const d = Math.sqrt(d2) + 1e-4;
+        const ndl = (dx*nx + dy*ny + dz*nz) / d;
+        if (ndl <= 0) continue;
+        const t = 1 - d / rad;
+        const k = t * t * L.inten * ndl;
+        sR += L.r * k; sG += L.g * k; sB += L.b * k;
+      }
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 5. terminal: atlas de glifos e blit em ImageData                    */
+/* ------------------------------------------------------------------ */
+/*  O buffer de saída é literalmente uma grade de caracteres. O atlas
+    guarda a máscara de cada glifo quantizada em 3 níveis; desenhar uma
+    célula é percorrer só os pixels acesos do glifo e escrever a cor da
+    célula já pré-multiplicada. Sem GPU, sem fillText por célula.      */
+
+const ATLAS_CHARS =
+  " !\"#$%&'()*+,-./0123456789:;<=>?@" +
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`" +
+  "abcdefghijklmnopqrstuvwxyz{|}~" +
+  "░▒▓█";
+const CHAR_IDX = new Map();
+for (let k = 0; k < ATLAS_CHARS.length; k++) CHAR_IDX.set(ATLAS_CHARS[k], k);
+const ci = ch => CHAR_IDX.get(ch) || 0;
 
 const CHARSETS = [
   { name: "classic", ramp: " .:-=+*#%@" },
   { name: "dense",   ramp: " .,:;i1tfLCG08@" },
-  { name: "minimal", ramp: " .·:*oO0@" },
-  { name: "blocks",  ramp: " ░▒▓█" }
+  { name: "minimal", ramp: " .:*oO0@" },
+  { name: "blocks",  ramp: " .░▒▓█" }
 ];
-const EDGE_CHARS = ["-", "/", "|", "\\"];   // deve casar com os bins do shader
-const GLYPH_PX = 16;                        // resolução de cada glifo no atlas
+let RAMP = null;                 // Uint8Array com os índices do atlas
+function setCharset(k){
+  RAMP = Uint8Array.from(Array.from(CHARSETS[k].ramp), c => ci(c));
+}
 
-const atlasTex = gl.createTexture();
-let atlasN = 1, rampN = 1;
+const CELL_SIZES = [[6,10],[7,12],[8,14],[10,17],[12,21],[14,25]];
+let cellW = 8, cellH = 14;
 
-function buildAtlas(charsetIndex){
-  const ramp  = Array.from(CHARSETS[charsetIndex].ramp);
-  const chars = ramp.concat(EDGE_CHARS);
-  rampN  = ramp.length;
-  atlasN = chars.length;
+let glyphOff = [], glyphLv = [];  // por glifo: offsets no framebuffer + nível
 
+function buildGlyphs(W){
   const c = document.createElement("canvas");
-  c.width  = atlasN * GLYPH_PX;
-  c.height = GLYPH_PX;
-  const ctx = c.getContext("2d");
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.fillStyle = "#fff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `bold ${Math.round(GLYPH_PX * 0.92)}px "DejaVu Sans Mono","Courier New",monospace`;
+  c.width = cellW; c.height = cellH;
+  const g = c.getContext("2d", { willReadFrequently: true });
+  glyphOff = new Array(ATLAS_CHARS.length);
+  glyphLv  = new Array(ATLAS_CHARS.length);
 
-  chars.forEach((ch, i) => {
-    ctx.fillText(ch, i * GLYPH_PX + GLYPH_PX / 2, GLYPH_PX / 2 + GLYPH_PX * 0.04);
-  });
+  for (let k = 0; k < ATLAS_CHARS.length; k++){
+    g.clearRect(0, 0, cellW, cellH);
+    g.fillStyle = "#fff";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.font = `${Math.round(cellH * 0.80)}px "DejaVu Sans Mono","Menlo","Consolas","Courier New",monospace`;
+    g.fillText(ATLAS_CHARS[k], cellW / 2, cellH / 2 + cellH * 0.06);
+    const px = g.getImageData(0, 0, cellW, cellH).data;
+    const off = [], lv = [];
+    for (let y = 0; y < cellH; y++){
+      for (let x = 0; x < cellW; x++){
+        const a = px[(y * cellW + x) * 4 + 3];
+        if (a < 26) continue;
+        off.push(y * W + x);
+        lv.push(a < 110 ? 1 : (a < 200 ? 2 : 3));
+      }
+    }
+    glyphOff[k] = Int32Array.from(off);
+    glyphLv[k]  = Uint8Array.from(lv);
+  }
+}
 
-  gl.bindTexture(gl.TEXTURE_2D, atlasTex);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, c);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d", { alpha: false });
+if (!ctx) fail("Não foi possível abrir o canvas 2D.");
+
+let COLS = 0, ROWS = 0, SW = 0, SH = 0;
+let cellChar = null, cellCol = null, cellDep = null, cellId = null;
+let imgData = null, imgU32 = null;
+const BG = 0xff05070a;            // ABGR
+const lut = new Uint32Array(4);
+
+function blit(){
+  imgU32.fill(BG);
+  for (let cy = 0; cy < ROWS; cy++){
+    const rowBase = cy * cellH * SW;
+    const line = cy * COLS;
+    for (let cx = 0; cx < COLS; cx++){
+      const g = cellChar[line + cx];
+      if (g === 0) continue;
+      const col = cellCol[line + cx];
+      const r = (col >> 16) & 255, gg = (col >> 8) & 255, b = col & 255;
+      lut[1] = 0xff000000 | ((b / 3) << 16) | ((gg / 3) << 8) | (r / 3);
+      lut[2] = 0xff000000 | (((b * 2 / 3) | 0) << 16) | (((gg * 2 / 3) | 0) << 8) | ((r * 2 / 3) | 0);
+      lut[3] = 0xff000000 | (b << 16) | (gg << 8) | r;
+      const O = glyphOff[g], L = glyphLv[g];
+      const base = rowBase + cx * cellW;
+      for (let k = 0; k < O.length; k++) imgU32[base + O[k]] = lut[L[k]];
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
 }
 
 /* ------------------------------------------------------------------ */
-/* alvos de renderização                                               */
+/* 6. raycaster                                                        */
 /* ------------------------------------------------------------------ */
 
-const RT = {
-  W: 0, H: 0, cols: 0, rows: 0,
-  sceneFbo: gl.createFramebuffer(), sceneCol: null, sceneGeo: null, depth: null,
-  edgeFbo: gl.createFramebuffer(),  edgeTex: null,
-  gridFbo: gl.createFramebuffer(),  gridTex: null
-};
+const cam = { x: 0, z: 0, yaw: 0, pitch: 0, eye: CFG.EYE };
+const TUNE = { exposure: 6.2, gamma: 0.82, black: 0.014, fov: 74 * Math.PI / 180 };
+let colorMode = true;
+let TIME = 0;
 
-function resizeTargets(W, H, cols, rows){
-  RT.W = W; RT.H = H; RT.cols = cols; RT.rows = rows;
+let projH = 0, projV = 0, horizon = 0, tanH = 0;
+let dirX = 0, dirZ = 0, rgtX = 0, rgtZ = 0;
+let zbuf = null, rdxs = null, rdzs = null;
 
-  for (const t of [RT.sceneCol, RT.sceneGeo, RT.edgeTex, RT.gridTex]) if (t) gl.deleteTexture(t);
-  if (RT.depth) gl.deleteRenderbuffer(RT.depth);
+/* pilha de paredes de uma coluna (evita alocar por frame) */
+const MAXHIT = 24;
+const hDist = new Float64Array(MAXHIT);
+const hHigh = new Float64Array(MAXHIT);
+const hSide = new Uint8Array(MAXHIT);
+const hMapX = new Int32Array(MAXHIT);
+const hMapZ = new Int32Array(MAXHIT);
 
-  RT.sceneCol = tex2D(W, H, gl.NEAREST);
-  RT.sceneGeo = tex2D(W, H, gl.NEAREST);
-  RT.edgeTex  = tex2D(W, H, gl.NEAREST);
-  RT.gridTex  = tex2D(cols, rows, gl.NEAREST);
+/** luminância -> glifo + cor (o coração do "de fato ASCII") */
+function emit(idx, r, g, b){
+  let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b - TUNE.black;
+  if (lum <= 0){ cellChar[idx] = 0; return; }
+  let t = 1 - Math.exp(-lum * TUNE.exposure);
+  t = Math.pow(t, TUNE.gamma);
+  let ri = (t * RAMP.length) | 0;
+  if (ri >= RAMP.length) ri = RAMP.length - 1;
+  cellChar[idx] = RAMP[ri];
+  if (RAMP[ri] === 0) return;
 
-  RT.depth = gl.createRenderbuffer();
-  gl.bindRenderbuffer(gl.RENDERBUFFER, RT.depth);
-  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, W, H);
+  if (colorMode){
+    const m = Math.max(r, Math.max(g, b)) || 1e-6;
+    const s = (0.40 + 0.60 * t) * 255 / m;
+    const R = r * s, G = g * s, B = b * s;
+    cellCol[idx] = ((R > 255 ? 255 : R) | 0) << 16 | ((G > 255 ? 255 : G) | 0) << 8 | ((B > 255 ? 255 : B) | 0);
+  } else {
+    const v = 0.30 + 0.70 * t;
+    cellCol[idx] = ((125 * v) | 0) << 16 | ((255 * v) | 0) << 8 | ((196 * v) | 0);
+  }
+}
+function emitChar(idx, glyph, r, g, b){
+  cellChar[idx] = glyph;
+  if (colorMode){
+    const m = Math.max(r, Math.max(g, b)) || 1e-6;
+    const s = 255 / m;
+    cellCol[idx] = ((r * s) | 0) << 16 | ((g * s) | 0) << 8 | ((b * s) | 0);
+  } else {
+    cellCol[idx] = 0x7dffc4;
+  }
+}
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.sceneFbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, RT.sceneCol, 0);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, RT.sceneGeo, 0);
-  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, RT.depth);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+/* ---- céu -------------------------------------------------------- */
+function skyColumn(cx, topRow, ang){
+  const line = cx;
+  for (let y = 0; y < topRow; y++){
+    const elev = (horizon - y - 0.5) / projV;          // tangente da elevação
+    const glow = Math.exp(-Math.abs(elev) * 2.6);
+    let r = 0.007 + 0.042 * glow;
+    let g = 0.010 + 0.026 * glow;
+    let b = 0.024 + 0.055 * glow;
+    if (elev > 0.05){
+      const s = hash3((ang * 58) | 0, (elev * 46) | 0, 7);
+      if (s > 0.9955){
+        const tw = 0.6 + 0.4 * Math.sin(TIME * 2.1 + s * 400);
+        r += 0.30 * tw; g += 0.38 * tw; b += 0.46 * tw;
+      }
+    }
+    emit(y * COLS + line, r, g, b);
+  }
+}
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.edgeFbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, RT.edgeTex, 0);
+/* ---- material do piso ------------------------------------------- */
+function groundColor(wx, wz, out){
+  const tx = Math.floor(wx), tz = Math.floor(wz);
+  const B = blockAtTile(tx, tz);
+  if (B){
+    const inner = wx > B.x0 + CFG.SIDEWALK_W && wx < B.x1 - CFG.SIDEWALK_W &&
+                  wz > B.z0 + CFG.SIDEWALK_W && wz < B.z1 - CFG.SIDEWALK_W;
+    // calçada: placas de 2 m com junta escura
+    const jx = Math.abs((wx * 0.5) % 1 - 0.5), jz = Math.abs((wz * 0.5) % 1 - 0.5);
+    const joint = (jx > 0.46 || jz > 0.46) ? 0.45 : 1.0;
+    const base = inner ? 0.20 : 0.30;                  // miolo de praça x calçada
+    out[0] = base * joint; out[1] = base * joint * 1.02; out[2] = base * joint * 1.12;
+    return;
+  }
+  // asfalto + faixa central tracejada no eixo da rua
+  const cxs = (wx - mAX0) < (mAX1 - wx) ? mAX0 : mAX1;
+  const czs = (wz - mAZ0) < (mAZ1 - wz) ? mAZ0 : mAZ1;
+  const dxs = Math.abs(wx - cxs), dzs = Math.abs(wz - czs);
+  let mark = 0;
+  if (dxs < HALF_ST && Math.abs(wx - cxs) < 0.16 && ((wz * 0.22) % 1) < 0.5) mark = 1;
+  if (dzs < HALF_ST && Math.abs(wz - czs) < 0.16 && ((wx * 0.22) % 1) < 0.5) mark = 1;
+  const a = 0.115 + mark * 0.85;
+  out[0] = a; out[1] = a * 0.99; out[2] = a * 0.95;
+}
+const gcol = [0, 0, 0];
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.gridFbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, RT.gridTex, 0);
+/* ---- fachada ------------------------------------------------------ */
+function facade(u, wy, lot, out){
+  const tone = lot ? lot.tone : 1;
+  const ao = 0.42 + 0.58 * Math.min(1, wy / 9);
+  let a = 0.215 * tone * ao;
+  out[0] = a; out[1] = a * 1.02; out[2] = a * 1.16;
+  out[3] = out[4] = out[5] = 0;                         // emissivo
 
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (!lot) return;
+  const cw = 2.35, ch = CFG.FLOOR_H;
+  const wc = Math.floor(u / cw), wr = Math.floor(wy / ch);
+  const fu = u / cw - wc, fv = wy / ch - wr;
+  if (fu < 0.17 || fu > 0.83 || fv < 0.24 || fv > 0.82) return;
+  const h = hash3(wc, wr, lot.seed);
+  if (h < 0.42) return;                                  // apagada
+  if (hash3(wc, wr + ((TIME * 0.5) | 0), lot.seed ^ 99) > 0.992) return;   // pisca
+  const warm = h < 0.80;
+  const k = 0.55 + 0.75 * hash3(wc, wr, lot.seed ^ 7);
+  if (warm){ out[3] = 1.00 * k; out[4] = 0.80 * k; out[5] = 0.48 * k; }
+  else {
+    const c = NEON[Math.floor(h * 997) % NEON.length];
+    out[3] = c[0] * k; out[4] = c[1] * k; out[5] = c[2] * k;
+  }
+}
+const fcol = [0, 0, 0, 0, 0, 0];
+
+/* ---- conteúdo de outdoor / telão ---------------------------------- */
+const LETTER_W = 1.15, LETTER_H = 1.70;      // tamanho de uma letra no mundo
+
+function billboardCell(bb, u, wy, out){
+  const w = bb.u1 - bb.u0, h = bb.y1 - bb.y0;
+  const ul = bb.nrm > 0 ? (u - bb.u0) : (bb.u1 - u);   // texto sempre legível de fora
+  const vl = bb.y1 - wy;
+
+  // moldura acesa
+  if (ul < 0.35 || ul > w - 0.35 || vl < 0.30 || vl > h - 0.30){
+    const p = 0.75 + 0.25 * Math.sin(TIME * 3 + bb.phase);
+    out[0] = bb.r * 2.2 * p; out[1] = bb.g * 2.2 * p; out[2] = bb.b * 2.2 * p;
+    return ci("█");
+  }
+
+  if (bb.screen){
+    // telão: equalizador animado
+    const cw = 0.62, chh = 0.62;
+    const cxp = Math.floor(ul / cw), cyp = Math.floor(vl / chh);
+    const nrows = Math.max(1, Math.floor((h - 0.6) / chh));
+    const t = TIME * bb.speed + bb.phase;
+    const level = (0.5 + 0.5 * Math.sin(t * 2.1 + cxp * 0.85) * Math.sin(t * 0.73 + cxp * 0.37)) * nrows;
+    const from = nrows - cyp;
+    if (from > level) { out[0] = bb.r * 0.10; out[1] = bb.g * 0.10; out[2] = bb.b * 0.14; return ci("░"); }
+    const inten = 0.6 + 0.4 * (1 - from / Math.max(1, level));
+    out[0] = bb.r * 2.8 * inten; out[1] = bb.g * 2.8 * inten; out[2] = bb.b * 2.8 * inten;
+    return ci(from > level - 1 ? "▓" : "█");
+  }
+
+  // outdoor: a mensagem corre pelo painel em letras de matriz 5x7
+  const txt = bb.text;
+  const textW = txt.length * LETTER_W;
+  const shift = (TIME * bb.speed * 2.2) % (textW + w);
+  const lx = ul - (w - shift);
+  const li = Math.floor(lx / LETTER_W);
+  const vy = (vl - (h - LETTER_H) * 0.5) / LETTER_H;
+  if (li >= 0 && li < txt.length && vy >= 0 && vy < 1){
+    const gl = FONT57.get(txt[li]) || FONT_BLANK;
+    const fx = (lx - li * LETTER_W) / LETTER_W;
+    const cxp = Math.min(4, (fx * 5) | 0), cyp = Math.min(6, (vy * 7) | 0);
+    if (gl[cyp * 5 + cxp]){
+      out[0] = bb.r * 3.1; out[1] = bb.g * 3.1; out[2] = bb.b * 3.1;
+      return ci("█");
+    }
+  }
+  out[0] = bb.r * 0.09; out[1] = bb.g * 0.09; out[2] = bb.b * 0.13;
+  return ci("░");
+}
+const bcol = [0, 0, 0];
+
+/* ---- o passe principal -------------------------------------------- */
+function renderWorld(){
+  const px = cam.x, pz = cam.z, eye = cam.eye;
+  dirX = Math.sin(cam.yaw);  dirZ = -Math.cos(cam.yaw);
+  rgtX = Math.cos(cam.yaw);  rgtZ =  Math.sin(cam.yaw);
+  tanH  = Math.tan(TUNE.fov / 2);
+  projH = (COLS / 2) / tanH;
+  projV = projH * cellW / cellH;
+  horizon = ROWS / 2 + Math.tan(cam.pitch) * projV;
+
+  const fogR = 0.016, fogG = 0.016, fogB = 0.030;
+  cellChar.fill(0);
+  cellDep.fill(1e9);
+  cellId.fill(0);
+
+  for (let cx = 0; cx < COLS; cx++){
+    const camX = ((cx + 0.5) / COLS) * 2 - 1;
+    const rdx = dirX + rgtX * camX * tanH;
+    const rdz = dirZ + rgtZ * camX * tanH;
+    rdxs[cx] = rdx; rdzs[cx] = rdz;
+
+    /* --- DDA sobre a malha de 1 m --- */
+    let mapX = Math.floor(px), mapZ = Math.floor(pz);
+    const ddx = rdx === 0 ? 1e30 : Math.abs(1 / rdx);
+    const ddz = rdz === 0 ? 1e30 : Math.abs(1 / rdz);
+    let stepX, stepZ, sdx, sdz;
+    if (rdx < 0){ stepX = -1; sdx = (px - mapX) * ddx; } else { stepX = 1; sdx = (mapX + 1 - px) * ddx; }
+    if (rdz < 0){ stepZ = -1; sdz = (pz - mapZ) * ddz; } else { stepZ = 1; sdz = (mapZ + 1 - pz) * ddz; }
+
+    let nHit = 0, prevH = heightAtTile(mapX, mapZ), dist = 0, side = 0;
+    while (dist < CFG.FOG && nHit < MAXHIT){
+      if (sdx < sdz){ dist = sdx; sdx += ddx; mapX += stepX; side = 0; }
+      else          { dist = sdz; sdz += ddz; mapZ += stepZ; side = 1; }
+      const h = heightAtTile(mapX, mapZ);
+      if (h > prevH){
+        hDist[nHit] = dist; hHigh[nHit] = h; hSide[nHit] = side;
+        hMapX[nHit] = mapX; hMapZ[nHit] = mapZ;
+        nHit++;
+        const top = horizon - (h - eye) * projV / dist;
+        if (top <= 0) break;                     // cobre o topo: nada atrás aparece
+      }
+      prevH = h;
+    }
+    zbuf[cx] = nHit ? hDist[0] : 1e9;
+
+    /* --- piso: começa embaixo da parede mais próxima quando ela já
+           cobre o horizonte, senão vem desde o horizonte --- */
+    let floorFrom = Math.max(0, Math.ceil(horizon));
+    if (nHit > 0){
+      const d0 = hDist[0];
+      const ny0 = Math.floor(horizon - (hHigh[0] - eye) * projV / d0);
+      const ny1 = Math.ceil(horizon + eye * projV / d0);
+      if (ny0 <= floorFrom) floorFrom = Math.max(floorFrom, ny1);
+    }
+    for (let y = floorFrom; y < ROWS; y++){
+      const denom = y + 0.5 - horizon;
+      if (denom <= 0.001) continue;
+      const d = eye * projV / denom;
+      const idx = y * COLS + cx;
+      if (d > CFG.FOG){ cellChar[idx] = 0; continue; }
+      const wx = px + rdx * d, wz = pz + rdz * d;
+      groundColor(wx, wz, gcol);
+      shade(wx, 0.02, wz, 0, 1, 0);
+      cellDep[idx] = d;
+      cellId[idx] = 1;
+      const fg = 1 - Math.exp(-(d / CFG.FOG) * (d / CFG.FOG) * 2.4);
+      emit(idx,
+        (gcol[0] * sR) * (1 - fg) + fogR * fg,
+        (gcol[1] * sG) * (1 - fg) + fogG * fg,
+        (gcol[2] * sB) * (1 - fg) + fogB * fg);
+    }
+
+    /* --- paredes, do fundo para a frente --- */
+    let topCovered = ROWS;
+    for (let n = nHit - 1; n >= 0; n--){
+      const d = hDist[n], h = hHigh[n];
+      let y0 = Math.floor(horizon - (h - eye) * projV / d);
+      let y1 = Math.ceil(horizon + eye * projV / d);
+      if (y1 < 0 || y0 >= ROWS) continue;
+      if (y0 < topCovered) topCovered = Math.max(0, y0);
+      if (y0 < 0) y0 = 0;
+      if (y1 > ROWS) y1 = ROWS;
+
+      const B = blockAtTile(hMapX[n], hMapZ[n]);
+      const lot = B ? B.lots[B.lotId[(hMapZ[n] - B.z0) * B.w + (hMapX[n] - B.x0)] - 1] : null;
+      const faceId = lot ? (4 + ((lot.uid + hSide[n] * 7919 + (h | 0) * 31) & 0x7fff)) : 3;
+
+      let nx = 0, nz = 0, wallU, planeC;
+      if (hSide[n] === 0){
+        nx = -stepX; planeC = mapXPlane(hMapX[n], stepX); wallU = pz + d * rdz;
+      } else {
+        nz = -stepZ; planeC = mapXPlane(hMapZ[n], stepZ); wallU = px + d * rdx;
+      }
+      const wx = hSide[n] === 0 ? planeC : wallU;
+      const wz = hSide[n] === 0 ? wallU : planeC;
+
+      /* outdoor que cobre esta coluna? */
+      let bb = null;
+      if (B){
+        for (let k = 0; k < B.bbs.length; k++){
+          const q = B.bbs[k];
+          if (q.axis !== hSide[n]) continue;
+          if (q.nrm !== (hSide[n] === 0 ? nx : nz)) continue;
+          if (Math.abs(q.plane - planeC) > 0.01) continue;
+          if (wallU < q.u0 || wallU > q.u1) continue;
+          bb = q; break;
+        }
+      }
+
+      const fog = 1 - Math.exp(-(d / CFG.FOG) * (d / CFG.FOG) * 2.4);
+      for (let y = y0; y < y1; y++){
+        const wy = eye + (horizon - y - 0.5) * d / projV;
+        if (wy < 0) continue;
+        const idx = y * COLS + cx;
+        cellDep[idx] = d;
+        cellId[idx] = faceId;
+
+        if (bb && wy >= bb.y0 && wy <= bb.y1){
+          const gph = billboardCell(bb, wallU, wy, bcol);
+          if (gph){
+            emitChar(idx, gph,
+              bcol[0] * (1 - fog) + fogR * fog,
+              bcol[1] * (1 - fog) + fogG * fog,
+              bcol[2] * (1 - fog) + fogB * fog);
+            continue;
+          }
+        }
+
+        facade(wallU, wy, lot, fcol);
+        shade(wx, wy, wz, nx, 0, nz);
+        let r = fcol[0] * sR + fcol[3];
+        let g = fcol[1] * sG + fcol[4];
+        let b = fcol[2] * sB + fcol[5];
+        emit(idx, r * (1 - fog) + fogR * fog, g * (1 - fog) + fogG * fog, b * (1 - fog) + fogB * fog);
+      }
+    }
+
+    /* --- céu --- */
+    skyColumn(cx, Math.min(topCovered, Math.max(0, Math.ceil(horizon))),
+              Math.atan2(rdz, rdx));
+  }
+}
+function mapXPlane(m, step){ return step > 0 ? m : m + 1; }
+
+/* ------------------------------------------------------------------ */
+/* 6b. contornos                                                       */
+/* ------------------------------------------------------------------ */
+/*  A v1 achava as bordas por Sobel na imagem. Aqui não existe imagem —
+    existe o z-buffer da própria grade de caracteres. Então a silhueta é
+    exata: onde a profundidade salta entre células vizinhas, o glifo vira
+    um traço | - / \ na direção da descontinuidade. Custa uma varredura
+    da grade e é o que faz a cidade "ler" em texto.                     */
+
+let edgesOn = true;
+const G_PIPE = ci("|"), G_DASH = ci("-"), G_FS = ci("/"), G_BS = ci("\\"), G_PLUS = ci("+");
+
+function edgePass(){
+  for (let y = 0; y < ROWS; y++){
+    for (let x = 0; x < COLS; x++){
+      const i = y * COLS + x;
+      const id = cellId[i];
+      if (id < 2) continue;                // céu e piso não recebem contorno
+      const d = cellDep[i];
+      // vizinho de outra superfície E mais longe = silhueta deste lado
+      const lF = x > 0        && cellId[i - 1]    !== id && cellDep[i - 1]    > d;
+      const rF = x < COLS - 1 && cellId[i + 1]    !== id && cellDep[i + 1]    > d;
+      const uF = y > 0        && cellId[i - COLS] !== id && cellDep[i - COLS] > d;
+      const wF = y < ROWS - 1 && cellId[i + COLS] !== id && cellDep[i + COLS] > d;
+      const v = lF || rF, h = uF || wF;
+      if (!v && !h) continue;
+      let g;
+      if (v && h){
+        if ((lF && uF) || (rF && wF)) g = G_BS;
+        else if ((rF && uF) || (lF && wF)) g = G_FS;
+        else g = G_PLUS;
+      } else g = v ? G_PIPE : G_DASH;
+      cellChar[i] = g;
+      // realce relativo: o contorno acompanha o brilho da célula, então
+      // prédio distante não ganha uma silhueta mais forte que o da frente
+      const c = cellCol[i];
+      const rr = ((c >> 16) & 255) * 1.7, gg = ((c >> 8) & 255) * 1.7, bb2 = (c & 255) * 1.7;
+      cellCol[i] = (rr > 255 ? 255 : rr | 0) << 16 | (gg > 255 ? 255 : gg | 0) << 8 | (bb2 > 255 ? 255 : bb2 | 0);
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
-/* malha da cidade                                                     */
+/* 7. sprites (postes e árvores) com teste de profundidade por coluna  */
 /* ------------------------------------------------------------------ */
 
-const cityVbo = gl.createBuffer();
-const cityVao = gl.createVertexArray();
-let cityCount = 0;
-let city = null;
+function spriteProject(wx, wz){
+  const dx = wx - cam.x, dz = wz - cam.z;
+  const t = dx * dirX + dz * dirZ;
+  if (t < 0.4 || t > CFG.FOG) return null;
+  const s = dx * rgtX + dz * rgtZ;
+  return { t, col: COLS / 2 + (s / t / tanH) * (COLS / 2) };
+}
 
-function uploadCity(data){
-  city = data;
-  cityCount = data.count;
-  gl.bindVertexArray(cityVao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, cityVbo);
-  gl.bufferData(gl.ARRAY_BUFFER, data.vertices, gl.STATIC_DRAW);
+let spriteId = 40000;
+function nextSpriteId(){ spriteId = spriteId >= 65000 ? 40000 : spriteId + 1; return spriteId; }
 
-  const stride = 10 * 4;
-  const loc = {
-    aPos:  gl.getAttribLocation(P_SCENE.p, "aPos"),
-    aNrm:  gl.getAttribLocation(P_SCENE.p, "aNrm"),
-    aUV:   gl.getAttribLocation(P_SCENE.p, "aUV"),
-    aMeta: gl.getAttribLocation(P_SCENE.p, "aMeta")
-  };
-  gl.enableVertexAttribArray(loc.aPos);
-  gl.vertexAttribPointer(loc.aPos, 3, gl.FLOAT, false, stride, 0);
-  gl.enableVertexAttribArray(loc.aNrm);
-  gl.vertexAttribPointer(loc.aNrm, 3, gl.FLOAT, false, stride, 12);
-  gl.enableVertexAttribArray(loc.aUV);
-  gl.vertexAttribPointer(loc.aUV, 2, gl.FLOAT, false, stride, 24);
-  gl.enableVertexAttribArray(loc.aMeta);
-  gl.vertexAttribPointer(loc.aMeta, 2, gl.FLOAT, false, stride, 32);
-  gl.bindVertexArray(null);
+function drawLamp(L){
+  const p = spriteProject(L.x, L.z);
+  if (!p) return;
+  const sid = nextSpriteId();
+  const t = p.t;
+  const fog = 1 - Math.exp(-(t / CFG.FOG) * (t / CFG.FOG) * 2.4);
+  const yBase = horizon + cam.eye * projV / t;
+  const yTop  = horizon - (L.h - cam.eye) * projV / t;
+  const halfPole = Math.max(0.5, (0.085 / t / tanH) * (COLS / 2));
+  const halfHead = Math.max(0.6, (0.30 / t / tanH) * (COLS / 2));
+  const headTop = horizon - (L.h + 0.55 - cam.eye) * projV / t;
+
+  // haste
+  shade(L.x, L.h * 0.5, L.z, 0, 0.2, 1);
+  const pr = 0.20 * sR + 0.02, pg = 0.20 * sG + 0.02, pb = 0.20 * sB + 0.03;
+  const c0 = Math.max(0, Math.round(p.col - halfPole)), c1 = Math.min(COLS - 1, Math.round(p.col + halfPole));
+  for (let cx = c0; cx <= c1; cx++){
+    if (t >= zbuf[cx]) continue;
+    const y0 = Math.max(0, Math.ceil(yTop)), y1 = Math.min(ROWS - 1, Math.floor(yBase));
+    for (let y = y0; y <= y1; y++){
+      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid; cellId[y * COLS + cx] = sid;
+      emit(y * COLS + cx, pr * (1 - fog), pg * (1 - fog), pb * (1 - fog));
+    }
+  }
+  // luminária
+  const h0 = Math.max(0, Math.ceil(headTop)), h1 = Math.min(ROWS - 1, Math.floor(yTop));
+  const d0 = Math.max(0, Math.round(p.col - halfHead)), d1 = Math.min(COLS - 1, Math.round(p.col + halfHead));
+  for (let cx = d0; cx <= d1; cx++){
+    if (t >= zbuf[cx]) continue;
+    for (let y = h0; y <= h1; y++){
+      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid; cellId[y * COLS + cx] = sid;
+      emit(y * COLS + cx, L.r * 3.2 * (1 - fog), L.g * 3.2 * (1 - fog), L.b * 3.2 * (1 - fog));
+    }
+  }
+}
+
+function drawTree(T){
+  const p = spriteProject(T.x, T.z);
+  if (!p) return;
+  const sid = nextSpriteId();
+  const t = p.t;
+  const fog = 1 - Math.exp(-(t / CFG.FOG) * (t / CFG.FOG) * 2.4);
+  const yBase = horizon + cam.eye * projV / t;
+  const trunkTop = horizon - (T.h * 0.42 - cam.eye) * projV / t;
+  const halfTrunk = Math.max(0.5, (0.14 / t / tanH) * (COLS / 2));
+
+  shade(T.x, T.h * 0.3, T.z, 0, 0.3, 1);
+  const tr = 0.18 * sR, tg = 0.15 * sG, tb = 0.12 * sB;
+  let c0 = Math.max(0, Math.round(p.col - halfTrunk)), c1 = Math.min(COLS - 1, Math.round(p.col + halfTrunk));
+  for (let cx = c0; cx <= c1; cx++){
+    if (t >= zbuf[cx]) continue;
+    for (let y = Math.max(0, Math.ceil(trunkTop)); y <= Math.min(ROWS - 1, Math.floor(yBase)); y++){
+      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid;
+      emit(y * COLS + cx, tr * (1 - fog), tg * (1 - fog), tb * (1 - fog));
+    }
+  }
+  // copa
+  const cy = T.h * 0.74, rx = 1.7, ry = 1.5;
+  shade(T.x, cy, T.z, 0, 1, 0);
+  const lr = 0.26 * sR, lg = 0.40 * sG, lb = 0.22 * sB;
+  const halfC = (rx / t / tanH) * (COLS / 2);
+  const yc = horizon - (cy - cam.eye) * projV / t;
+  const halfR = (ry * projV / t);
+  c0 = Math.max(0, Math.round(p.col - halfC)); c1 = Math.min(COLS - 1, Math.round(p.col + halfC));
+  for (let cx = c0; cx <= c1; cx++){
+    if (t >= zbuf[cx]) continue;
+    const u = (cx - p.col) / Math.max(0.5, halfC);
+    const hh = Math.sqrt(Math.max(0, 1 - u * u)) * halfR;
+    for (let y = Math.max(0, Math.ceil(yc - hh)); y <= Math.min(ROWS - 1, Math.floor(yc + hh)); y++){
+      const n = hash3(cx, y, 3) * 0.5 + 0.75;
+      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid;
+      emit(y * COLS + cx, lr * n * (1 - fog), lg * n * (1 - fog), lb * n * (1 - fog));
+
+    }
+  }
+}
+
+function renderSprites(){
+  const bi = idxX(cam.x), bj = idxZ(cam.z);
+  for (let dj = -2; dj <= 2; dj++){
+    for (let di = -2; di <= 2; di++){
+      const B = getBlock(bi + di, bj + dj);
+      for (let k = 0; k < B.lamps.length; k++) drawLamp(B.lamps[k]);
+      for (let k = 0; k < B.trees.length; k++) drawTree(B.trees[k]);
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
-/* estado do jogo e configurações                                      */
+/* 8. jogador                                                          */
 /* ------------------------------------------------------------------ */
 
-const CELL_SIZES = [4, 6, 8, 10, 12, 16];
-
-const S = {
-  cellIdx: 2,          // -> 8 px por caractere
-  charset: 1,
-  color: true,
-  edges: true,
-  raw: false,
-  crt: true,
-  hud: true,
-  fov: 74 * Math.PI / 180,
-  sens: 0.0021,
-  gamma: 0.85,
-  exposure: 7.5,
-  black: 0.022,        // abaixo disso a célula vira espaço
-  levels: 6,
-  edgeThresh: 0.32,    // magnitude mínima do Sobel por pixel
-  coverage: 0.085,     // fração da célula que precisa ser borda
-  lumaW: 0.85,
-  normalW: 1.15,
-  fog: 0.0115
-};
-
-const player = {
-  x: 0, z: 0, yaw: 0.6, pitch: -0.05,
-  vx: 0, vz: 0, eye: 1.72, eyeY: 1.72, bob: 0
-};
-
+const player = { vx: 0, vz: 0, bob: 0 };
 const keys = new Set();
 let locked = false;
-let seed = 20260822;
 
-function respawn(){
-  const c = Math.floor(GRIDN / 2);
-  player.x = c * BLOCK + STREET * 0.5;
-  player.z = c * BLOCK + STREET * 0.5;
-  player.vx = player.vz = 0;
-  player.yaw = 0.0; player.pitch = -0.02;
+function solidAt(x, z){ return heightAtTile(Math.floor(x), Math.floor(z)) > 0; }
+function blockedAt(x, z, r){
+  return solidAt(x - r, z - r) || solidAt(x + r, z - r) ||
+         solidAt(x - r, z + r) || solidAt(x + r, z + r) || hitsLamp(x, z, r);
 }
-
-/* ---- colisão / chão ------------------------------------------------ */
-
-function blocked(px, pz, r){
-  const b = city.blockers;
-  for (let i = 0; i < b.length; i += 4){
-    if (px > b[i] - r && px < b[i+2] + r && pz > b[i+1] - r && pz < b[i+3] + r) return true;
+function hitsLamp(x, z, r){
+  const bi = idxX(x), bj = idxZ(z);
+  for (let dj = -1; dj <= 1; dj++){
+    for (let di = -1; di <= 1; di++){
+      const B = getBlock(bi + di, bj + dj);
+      for (let k = 0; k < B.lamps.length; k++){
+        const L = B.lamps[k];
+        const dx = L.x - x, dz = L.z - z;
+        if (dx * dx + dz * dz < (r + 0.16) * (r + 0.16)) return true;
+      }
+    }
   }
   return false;
 }
 
-function groundAt(px, pz){
-  const w = city.walks;
-  for (let i = 0; i < w.length; i += 4){
-    if (px > w[i] && px < w[i+2] && pz > w[i+1] && pz < w[i+3]) return SIDEWALK_H;
+/** procura uma rua livre perto da origem para nascer */
+function respawn(){
+  for (let k = 0; k < 400; k++){
+    const a = k * 2.399963, rad = Math.sqrt(k) * 3.2;
+    const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+    if (!blockedAt(x, z, 0.5)){ cam.x = x + 0.5; cam.z = z + 0.5; break; }
   }
-  return 0;
+  cam.yaw = hash3(WSEED, 5, 9) * Math.PI * 2;
+  cam.pitch = 0;
+  player.vx = player.vz = 0;
+  lgKey = "";
 }
-
-/* ---- controles ----------------------------------------------------- */
-
-const startEl = document.getElementById("start");
-
-function requestLock(){
-  const pr = canvas.requestPointerLock({ unadjustedMovement: true });
-  if (pr && typeof pr.catch === "function") pr.catch(() => canvas.requestPointerLock());
-}
-
-startEl.addEventListener("click", () => requestLock());
-canvas.addEventListener("click", () => { if (!locked) requestLock(); });
-
-document.addEventListener("pointerlockchange", () => {
-  locked = document.pointerLockElement === canvas;
-  startEl.style.display = locked ? "none" : "flex";
-  if (!locked){ keys.clear(); player.vx = player.vz = 0; }
-});
-
-document.addEventListener("mousemove", (e) => {
-  if (!locked) return;
-  player.yaw   += e.movementX * S.sens;
-  player.pitch -= e.movementY * S.sens;
-  player.pitch  = clamp(player.pitch, -1.45, 1.45);
-  if (player.yaw >  Math.PI) player.yaw -= Math.PI * 2;
-  if (player.yaw < -Math.PI) player.yaw += Math.PI * 2;
-});
-
-window.addEventListener("keydown", (e) => {
-  if (e.repeat) { e.preventDefault(); return; }
-  keys.add(e.code);
-  switch (e.code){
-    case "KeyC": S.color = !S.color; break;
-    case "KeyE": S.edges = !S.edges; break;
-    case "KeyX": S.raw   = !S.raw;   break;
-    case "KeyV": S.crt   = !S.crt;   break;
-    case "KeyH": S.hud   = !S.hud; document.getElementById("hud").style.display = S.hud ? "" : "none"; break;
-    case "KeyG": seed = (Math.random() * 1e9) | 0; uploadCity(buildCity(seed)); respawn(); break;
-    case "KeyR": respawn(); break;
-    case "KeyF":
-      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-      else document.exitFullscreen?.();
-      break;
-    case "BracketLeft":  S.cellIdx = clamp(S.cellIdx - 1, 0, CELL_SIZES.length - 1); resize(); break;
-    case "BracketRight": S.cellIdx = clamp(S.cellIdx + 1, 0, CELL_SIZES.length - 1); resize(); break;
-    case "Comma":       S.exposure = clamp(S.exposure - 0.5, 0.5, 30); break;
-    case "Period":      S.exposure = clamp(S.exposure + 0.5, 0.5, 30); break;
-    case "Semicolon":   S.black = clamp(S.black - 0.005, 0, 0.3); break;
-    case "Quote":       S.black = clamp(S.black + 0.005, 0, 0.3); break;
-    case "Minus":       S.edgeThresh = clamp(S.edgeThresh - 0.02, 0.02, 1.5); break;
-    case "Equal":       S.edgeThresh = clamp(S.edgeThresh + 0.02, 0.02, 1.5); break;
-    case "Digit1": case "Digit2": case "Digit3": case "Digit4":
-      S.charset = clamp(parseInt(e.code.slice(5), 10) - 1, 0, CHARSETS.length - 1);
-      buildAtlas(S.charset);
-      break;
-  }
-  if (["Tab","Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
-});
-window.addEventListener("keyup", (e) => keys.delete(e.code));
-window.addEventListener("blur", () => keys.clear());
-
-/* ---- redimensionamento --------------------------------------------- */
-
-function resize(){
-  const cellPx = CELL_SIZES[S.cellIdx];
-  const cw = Math.max(320, window.innerWidth);
-  const ch = Math.max(240, window.innerHeight);
-
-  const cols = clamp(Math.floor(cw / cellPx), 32, 320);
-  const rows = clamp(Math.floor(ch / cellPx), 18, 200);
-  const W = cols * cellPx, H = rows * cellPx;
-
-  canvas.width = W; canvas.height = H;
-  const scale = Math.min(cw / W, ch / H);
-  canvas.style.width  = Math.round(W * scale) + "px";
-  canvas.style.height = Math.round(H * scale) + "px";
-
-  resizeTargets(W, H, cols, rows);
-}
-window.addEventListener("resize", resize);
-
-/* ------------------------------------------------------------------ */
-/* atualização                                                         */
-/* ------------------------------------------------------------------ */
 
 function update(dt){
   const sprint = keys.has("ShiftLeft") || keys.has("ShiftRight");
-  const speed  = sprint ? 11.5 : 5.6;
-
+  const speed = sprint ? 11.0 : 5.4;
   let ix = 0, iz = 0;
   if (locked){
     if (keys.has("KeyW") || keys.has("ArrowUp"))    iz += 1;
@@ -1077,233 +1148,201 @@ function update(dt){
   const len = Math.hypot(ix, iz);
   if (len > 0){ ix /= len; iz /= len; }
 
-  // direção de caminhada no plano XZ (independente do pitch)
-  const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
   const wishX = (sy * iz + cy * ix) * speed;
   const wishZ = (-cy * iz + sy * ix) * speed;
-
-  // aceleração + atrito exponencial: dá inércia sem ficar escorregadio
-  const accel = len > 0 ? 14 : 11;
-  const k = 1 - Math.exp(-accel * dt);
+  const k = 1 - Math.exp(-(len > 0 ? 14 : 11) * dt);
   player.vx += (wishX - player.vx) * k;
   player.vz += (wishZ - player.vz) * k;
 
-  const R = 0.42;
-  const nx = player.x + player.vx * dt;
-  if (!blocked(nx, player.z, R)) player.x = nx; else player.vx = 0;
-  const nz = player.z + player.vz * dt;
-  if (!blocked(player.x, nz, R)) player.z = nz; else player.vz = 0;
+  const R = 0.34;
+  const nx = cam.x + player.vx * dt;
+  if (!blockedAt(nx, cam.z, R)) cam.x = nx; else player.vx = 0;
+  const nz = cam.z + player.vz * dt;
+  if (!blockedAt(cam.x, nz, R)) cam.z = nz; else player.vz = 0;
 
-  player.x = clamp(player.x, 0.6, WORLD - 0.6);
-  player.z = clamp(player.z, 0.6, WORLD - 0.6);
-
-  // altura do olho: sobe/desce suavemente ao pisar na calçada + head bob
-  const targetY = groundAt(player.x, player.z) + player.eye;
-  player.eyeY += (targetY - player.eyeY) * (1 - Math.exp(-12 * dt));
   const spd = Math.hypot(player.vx, player.vz);
-  player.bob += dt * spd * 1.65;
+  player.bob += dt * spd * 1.7;
   if (spd < 0.05) player.bob *= 0.9;
+  cam.eye = CFG.EYE + Math.sin(player.bob * 2) * 0.035;
+
+  rebuildLights(cam.x, cam.z);
 }
 
 /* ------------------------------------------------------------------ */
-/* renderização                                                        */
+/* 9. controles, tela e HUD                                            */
 /* ------------------------------------------------------------------ */
 
-const matProj = M4.identity();
-const matView = M4.identity();
-const matVP   = M4.identity();
+const startEl = document.getElementById("start");
+let cellIdx = 2, charsetIdx = 1, showHud = true, showMap = true;
 
-function drawFullscreen(){ gl.drawArrays(gl.TRIANGLES, 0, 3); }
-
-function render(time){
-  const W = RT.W, H = RT.H, aspect = W / H;
-  const tanHalf = Math.tan(S.fov / 2);
-
-  const cp = Math.cos(player.pitch), sp = Math.sin(player.pitch);
-  const cy = Math.cos(player.yaw),   sy = Math.sin(player.yaw);
-  const fwd   = [sy * cp, sp, -cy * cp];
-  const right = [cy, 0, sy];
-  const up    = [right[1]*fwd[2] - right[2]*fwd[1],
-                 right[2]*fwd[0] - right[0]*fwd[2],
-                 right[0]*fwd[1] - right[1]*fwd[0]];
-
-  const bobY = Math.sin(player.bob * 2.0) * 0.045;
-  const eye  = [player.x, player.eyeY + bobY, player.z];
-
-  M4.perspective(matProj, S.fov, aspect, 0.08, 520);
-  M4.view(matView, eye, right, up, fwd);
-  M4.mul(matVP, matProj, matView);
-
-  /* --- passe 1: céu + cena (MRT: cor / normais) --------------------- */
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.sceneFbo);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-  gl.viewport(0, 0, W, H);
-  gl.depthMask(true);            // o clear de profundidade respeita a máscara
-  gl.clear(gl.DEPTH_BUFFER_BIT);
-
-  gl.disable(gl.DEPTH_TEST);
-  gl.depthMask(false);
-  gl.disable(gl.CULL_FACE);
-  gl.useProgram(P_SKY.p);
-  gl.uniform3fv(P_SKY.u.uRight, right);
-  gl.uniform3fv(P_SKY.u.uUp, up);
-  gl.uniform3fv(P_SKY.u.uFwd, fwd);
-  gl.uniform1f(P_SKY.u.uTanHalf, tanHalf);
-  gl.uniform1f(P_SKY.u.uAspect, aspect);
-  gl.uniform1f(P_SKY.u.uTime, time);
-  drawFullscreen();
-
-  gl.enable(gl.DEPTH_TEST);
-  gl.depthMask(true);
-  gl.enable(gl.CULL_FACE);
-  gl.cullFace(gl.BACK);
-  gl.useProgram(P_SCENE.p);
-  gl.uniformMatrix4fv(P_SCENE.u.uVP, false, matVP);
-  gl.uniform3fv(P_SCENE.u.uEye, eye);
-  gl.uniform1f(P_SCENE.u.uTime, time);
-  gl.uniform1f(P_SCENE.u.uFog, S.fog);
-  gl.uniform1f(P_SCENE.u.uBlock, BLOCK);
-  gl.uniform1f(P_SCENE.u.uStreet, STREET);
-  gl.bindVertexArray(cityVao);
-  gl.drawArrays(gl.TRIANGLES, 0, cityCount);
-  gl.bindVertexArray(null);
-
-  gl.disable(gl.DEPTH_TEST);
-  gl.disable(gl.CULL_FACE);
-  gl.depthMask(false);
-
-  /* --- passe 2: Sobel (luminância + normais) ------------------------ */
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.edgeFbo);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  gl.viewport(0, 0, W, H);
-  gl.useProgram(P_EDGE.p);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, RT.sceneCol);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, RT.sceneGeo);
-  gl.uniform1i(P_EDGE.u.uColor, 0);
-  gl.uniform1i(P_EDGE.u.uGeo, 1);
-  gl.uniform2f(P_EDGE.u.uTexel, 1 / W, 1 / H);
-  gl.uniform1f(P_EDGE.u.uLumaW, S.lumaW);
-  gl.uniform1f(P_EDGE.u.uNormalW, S.normalW);
-  drawFullscreen();
-
-  /* --- passe 3: downsample para a grade de caracteres --------------- */
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.gridFbo);
-  gl.viewport(0, 0, RT.cols, RT.rows);
-  gl.useProgram(P_GRID.p);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, RT.sceneCol);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, RT.edgeTex);
-  gl.uniform1i(P_GRID.u.uColor, 0);
-  gl.uniform1i(P_GRID.u.uEdge, 1);
-  gl.uniform1i(P_GRID.u.uCell, CELL_SIZES[S.cellIdx]);
-  gl.uniform1f(P_GRID.u.uEdgeThresh, S.edgeThresh);
-  gl.uniform1f(P_GRID.u.uCoverage, S.coverage);
-  drawFullscreen();
-
-  /* --- passe 4: composição dos glifos ------------------------------- */
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.viewport(0, 0, W, H);
-  gl.useProgram(P_ASCII.p);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, RT.gridTex);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, atlasTex);
-  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, RT.sceneCol);
-  gl.uniform1i(P_ASCII.u.uGridTex, 0);
-  gl.uniform1i(P_ASCII.u.uAtlas, 1);
-  gl.uniform1i(P_ASCII.u.uScene, 2);
-  gl.uniform2f(P_ASCII.u.uGrid, RT.cols, RT.rows);
-  gl.uniform1f(P_ASCII.u.uAtlasN, atlasN);
-  gl.uniform1f(P_ASCII.u.uRampN, rampN);
-  gl.uniform1f(P_ASCII.u.uColorMode, S.color ? 1 : 0);
-  gl.uniform1f(P_ASCII.u.uEdgesOn, S.edges ? 1 : 0);
-  gl.uniform1f(P_ASCII.u.uRaw, S.raw ? 1 : 0);
-  gl.uniform1f(P_ASCII.u.uCrt, S.crt ? 1 : 0);
-  gl.uniform1f(P_ASCII.u.uGamma, S.gamma);
-  gl.uniform1f(P_ASCII.u.uExposure, S.exposure);
-  gl.uniform1f(P_ASCII.u.uBlack, S.black);
-  gl.uniform1f(P_ASCII.u.uLevels, S.levels);
-  gl.uniform3f(P_ASCII.u.uTint, 0.49, 1.0, 0.77);
-  gl.uniform3f(P_ASCII.u.uBg, 0.012, 0.024, 0.020);
-  drawFullscreen();
+function requestLock(){
+  const pr = canvas.requestPointerLock({ unadjustedMovement: true });
+  if (pr && typeof pr.catch === "function") pr.catch(() => canvas.requestPointerLock());
 }
+startEl.addEventListener("click", () => requestLock());
+canvas.addEventListener("click", () => { if (!locked) requestLock(); });
+document.addEventListener("pointerlockchange", () => {
+  locked = document.pointerLockElement === canvas;
+  startEl.style.display = locked ? "none" : "flex";
+  if (!locked){ keys.clear(); player.vx = player.vz = 0; }
+});
+document.addEventListener("mousemove", (e) => {
+  if (!locked) return;
+  cam.yaw += e.movementX * 0.0022;
+  cam.pitch = clamp(cam.pitch - e.movementY * 0.0020, -0.85, 0.85);
+  if (cam.yaw >  Math.PI) cam.yaw -= Math.PI * 2;
+  if (cam.yaw < -Math.PI) cam.yaw += Math.PI * 2;
+});
+window.addEventListener("keydown", (e) => {
+  if (e.repeat){ e.preventDefault(); return; }
+  keys.add(e.code);
+  switch (e.code){
+    case "KeyC": colorMode = !colorMode; break;
+    case "KeyL": lightsOn = !lightsOn; break;
+    case "KeyE": edgesOn = !edgesOn; break;
+    case "KeyM": showMap = !showMap; document.getElementById("map").style.display = showMap ? "" : "none"; break;
+    case "KeyH": showHud = !showHud; document.getElementById("hud").style.display = showHud ? "" : "none"; break;
+    case "KeyR": respawn(); break;
+    case "KeyG": WSEED = (Math.random() * 1e9) | 0; resetCity(); memoReset(); respawn(); break;
+    case "KeyF":
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+      break;
+    case "BracketLeft":  cellIdx = clamp(cellIdx - 1, 0, CELL_SIZES.length - 1); resize(); break;
+    case "BracketRight": cellIdx = clamp(cellIdx + 1, 0, CELL_SIZES.length - 1); resize(); break;
+    case "Comma":     TUNE.exposure = clamp(TUNE.exposure - 0.4, 0.6, 30); break;
+    case "Period":    TUNE.exposure = clamp(TUNE.exposure + 0.4, 0.6, 30); break;
+    case "Semicolon": TUNE.black = clamp(TUNE.black - 0.004, 0, 0.25); break;
+    case "Quote":     TUNE.black = clamp(TUNE.black + 0.004, 0, 0.25); break;
+    case "Digit1": case "Digit2": case "Digit3": case "Digit4":
+      charsetIdx = clamp(parseInt(e.code.slice(5), 10) - 1, 0, CHARSETS.length - 1);
+      setCharset(charsetIdx);
+      break;
+  }
+  if (["Tab","Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.code)) e.preventDefault();
+});
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => keys.clear());
 
-/* ------------------------------------------------------------------ */
-/* HUD                                                                 */
-/* ------------------------------------------------------------------ */
+function resize(){
+  [cellW, cellH] = CELL_SIZES[cellIdx];
+  const cw = Math.max(320, window.innerWidth), ch = Math.max(240, window.innerHeight);
+  COLS = clamp(Math.floor(cw / cellW), 40, 260);
+  ROWS = clamp(Math.floor(ch / cellH), 20, 150);
+  SW = COLS * cellW; SH = ROWS * cellH;
 
+  canvas.width = SW; canvas.height = SH;
+  const scale = Math.min(cw / SW, ch / SH);
+  canvas.style.width  = Math.round(SW * scale) + "px";
+  canvas.style.height = Math.round(SH * scale) + "px";
+
+  cellChar = new Uint8Array(COLS * ROWS);
+  cellCol  = new Uint32Array(COLS * ROWS);
+  cellDep  = new Float32Array(COLS * ROWS);
+  cellId   = new Uint16Array(COLS * ROWS);
+  zbuf = new Float64Array(COLS);
+  rdxs = new Float64Array(COLS);
+  rdzs = new Float64Array(COLS);
+  imgData = ctx.createImageData(SW, SH);
+  imgU32 = new Uint32Array(imgData.data.buffer);
+  buildGlyphs(SW);
+}
+window.addEventListener("resize", resize);
+
+/* ---- HUD ---------------------------------------------------------- */
 const statsEl = document.getElementById("stats");
 const helpEl  = document.getElementById("help");
-let fps = 60, hudAcc = 0;
+const mapEl   = document.getElementById("map");
+let fps = 60, hudT = 0, mapT = 0, frameMs = 0;
 
 helpEl.innerHTML =
   `<span class="k">WASD</span> mover   <span class="k">MOUSE</span> olhar   <span class="k">SHIFT</span> correr\n` +
-  `<span class="k">C</span> cor        <span class="k">E</span> contornos    <span class="k">X</span> raw 3d\n` +
-  `<span class="k">[ ]</span> célula   <span class="k">1-4</span> charset     <span class="k">V</span> crt\n` +
-  `<span class="k">G</span> nova cidade <span class="k">R</span> respawn     <span class="k">F</span> tela cheia\n` +
-  `<span class="k">H</span> hud        <span class="k">ESC</span> liberar cursor\n` +
-  `<span class="k">, .</span> exposição <span class="k">; '</span> preto  <span class="k">- =</span> contorno`;
+  `<span class="k">C</span> cor        <span class="k">L</span> luz dinâmica  <span class="k">E</span> contornos\n` +
+  `<span class="k">M</span> mapa       <span class="k">H</span> hud\n` +
+  `<span class="k">[ ]</span> célula   <span class="k">1-4</span> charset     <span class="k">F</span> tela cheia\n` +
+  `<span class="k">G</span> outro mundo <span class="k">R</span> respawn     <span class="k">H</span> hud\n` +
+  `<span class="k">, .</span> exposição <span class="k">; '</span> preto   <span class="k">ESC</span> solta o cursor`;
 
 function updateHud(){
-  const cs = CHARSETS[S.charset];
+  const i = idxX(cam.x), j = idxZ(cam.z);
   statsEl.innerHTML =
-    `ASCII CITY // prototype 01\n` +
-    `<span class="muted">fps    </span>${fps.toFixed(0).padStart(3)}   ` +
-    `<span class="muted">grade </span>${RT.cols}x${RT.rows} @${CELL_SIZES[S.cellIdx]}px\n` +
-    `<span class="muted">chars  </span>${(RT.cols * RT.rows).toLocaleString("pt-BR")}   ` +
-    `<span class="muted">set   </span>${cs.name} (${cs.ramp.length})\n` +
-    `<span class="muted">pos    </span>${player.x.toFixed(1)}, ${player.z.toFixed(1)}   ` +
-    `<span class="muted">tris  </span>${(cityCount / 3) | 0}\n` +
-    `<span class="muted">modo   </span>${S.raw ? "RAW 3D" : (S.color ? "cor" : "mono")}` +
-    `${S.edges ? " + contornos" : ""}${S.crt ? " + crt" : ""}\n` +
-    `<span class="muted">exp    </span>${S.exposure.toFixed(1)}   ` +
-    `<span class="muted">preto </span>${S.black.toFixed(3)}   ` +
-    `<span class="muted">borda </span>${S.edgeThresh.toFixed(2)}`;
+    `ASCII CITY // prototype 02\n` +
+    `<span class="muted">fps    </span>${fps.toFixed(0).padStart(3)}  ` +
+    `<span class="muted">frame </span>${frameMs.toFixed(1)}ms\n` +
+    `<span class="muted">grade  </span>${COLS}x${ROWS} @${cellW}x${cellH}px  ` +
+    `<span class="muted">= </span>${(COLS * ROWS).toLocaleString("pt-BR")} chars\n` +
+    `<span class="muted">pos    </span>${cam.x.toFixed(1)}, ${cam.z.toFixed(1)}  ` +
+    `<span class="muted">quart.</span> ${i},${j}\n` +
+    `<span class="muted">set    </span>${CHARSETS[charsetIdx].name}  ` +
+    `<span class="muted">luz </span>${lightsOn ? "on" : "off"}  ` +
+    `<span class="muted">cor </span>${colorMode ? "on" : "off"}  ` +
+    `<span class="muted">bordas </span>${edgesOn ? "on" : "off"}\n` +
+    `<span class="muted">blocos </span>${blockCache.size} em cache  ` +
+    `<span class="muted">seed </span>${WSEED}`;
+}
+
+/* minimapa: amostra a própria malha do mundo, então mostra a cidade real */
+const MAP_N = 25, MAP_STEP = 3;
+function updateMap(){
+  const cxp = Math.floor(cam.x), czp = Math.floor(cam.z);
+  const dirI = Math.round(Math.sin(cam.yaw)), dirJ = Math.round(-Math.cos(cam.yaw));
+  let out = "";
+  for (let j = -MAP_N >> 1; j <= MAP_N >> 1; j++){
+    for (let i = -MAP_N >> 1; i <= MAP_N >> 1; i++){
+      if (i === 0 && j === 0){ out += "@"; continue; }
+      if (i === dirI && j === dirJ){ out += "^"; continue; }
+      const h = heightAtTile(cxp + i * MAP_STEP, czp + j * MAP_STEP);
+      out += h === 0 ? "·" : (h < 12 ? "▒" : (h < 30 ? "▓" : "█"));
+    }
+    out += "\n";
+  }
+  mapEl.textContent = out;
 }
 
 /* banner do menu, montado a partir de uma fonte 5x5 */
-(function buildBanner(){
+(function banner(){
   const F = {
-    A:[".##.","#..#","####","#..#","#..#"],
-    S:[".###","#...",".##.","...#","###."],
-    C:[".###","#...","#...","#...",".###"],
-    I:["###",".#.",".#.",".#.","###"],
-    T:["#####","..#..","..#..","..#..","..#.."],
-    Y:["#...#",".#.#.","..#..","..#..","..#.."],
+    A:[".##.","#..#","####","#..#","#..#"], S:[".###","#...",".##.","...#","###."],
+    C:[".###","#...","#...","#...",".###"], I:["###",".#.",".#.",".#.","###"],
+    T:["#####","..#..","..#..","..#..","..#.."], Y:["#...#",".#.#.","..#..","..#..","..#.."],
     " ":["  ","  ","  ","  ","  "]
   };
-  const word = "ASCII CITY";
-  const rows = ["", "", "", "", ""];
-  for (const ch of word){
+  const rows = ["","","","",""];
+  for (const ch of "ASCII CITY"){
     const g = F[ch];
-    for (let r = 0; r < 5; r++){
-      rows[r] += g[r].replace(/#/g, "██").replace(/\./g, "  ").replace(/ /g, " ") + " ";
-    }
+    for (let r = 0; r < 5; r++) rows[r] += g[r].replace(/#/g, "██").replace(/\./g, "  ") + " ";
   }
   document.getElementById("title").textContent = rows.join("\n");
 })();
 
 /* ------------------------------------------------------------------ */
-/* boot + loop                                                         */
+/* 10. boot + loop                                                     */
 /* ------------------------------------------------------------------ */
 
-buildAtlas(S.charset);
-uploadCity(buildCity(seed));
-respawn();
+setCharset(charsetIdx);
 resize();
-
-gl.clearColor(0, 0, 0, 1);
-gl.enable(gl.DEPTH_TEST);
+respawn();
 
 let last = performance.now();
 function frame(now){
   let dt = (now - last) / 1000;
   last = now;
-  dt = Math.min(dt, 0.05);
+  if (dt > 0.05) dt = 0.05;
+  TIME = now / 1000;
 
   update(dt);
-  render(now / 1000);
+  const t0 = performance.now();
+  renderWorld();
+  renderSprites();
+  if (edgesOn) edgePass();
+  blit();
+  frameMs = frameMs * 0.9 + (performance.now() - t0) * 0.1;
 
   fps = lerp(fps, 1 / Math.max(dt, 1e-4), 0.08);
-  hudAcc += dt;
-  if (S.hud && hudAcc > 0.12){ hudAcc = 0; updateHud(); }
+  hudT += dt; mapT += dt;
+  if (showHud && hudT > 0.15){ hudT = 0; updateHud(); }
+  if (showMap && mapT > 0.25){ mapT = 0; updateMap(); }
 
   requestAnimationFrame(frame);
 }
