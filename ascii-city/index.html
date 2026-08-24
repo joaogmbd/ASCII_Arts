@@ -1620,13 +1620,22 @@ function renderWorld(){
     for (let k = 0; k <= nStep && yFill >= 0; k++){
       const h = stepH[k];
       if (h >= eye) break;
-      const dFar = k < nStep ? stepD[k + 1] : TUNE.dist;
+      const dNear = k === 0 ? 0.02 : stepD[k];
+      const dFar  = k < nStep ? stepD[k + 1] : TUNE.dist;
       const alt = eye - h;
       /* Em vez de resolver a linha inicial e a final (o que custaria dois
          arco-tangentes por passo), anda com a própria marca-d'água: cada
          linha sabe a sua tangente, então a distância sai direto, e a linha
-         só deixa de ser deste tile quando passa da saída dele. Assim cada
-         linha da coluna é visitada uma vez só na marcha inteira.        */
+         é deste tile só enquanto a distância cai entre a entrada e a saída
+         dele. Assim cada linha da coluna é visitada uma vez só na marcha.
+
+         As DUAS pontas importam. Quando o raio sobe de degrau — sai da rua
+         e entra num telhado — a altura acima do chão despenca, e com ela a
+         distância que cada linha representa: sem a ponta de baixo, o
+         telhado de um prédio a 100 m se espalhava por linhas cuja
+         distância real era de poucos metros, gravando profundidades muito
+         menores que a verdadeira. Essas linhas são justamente as da PAREDE
+         que sobe ali, e é a parede que tem de pintá-las.                */
       let y = yFill;
       luzX = 1e9; luzZ = 1e9;                    // memo de luz, um por tile
       for (; y >= 0; y--){
@@ -1634,6 +1643,7 @@ function renderWorld(){
         if (tg <= 1e-6){ y = -1; break; }          // desta linha para cima é céu
         const d = alt / tg;
         if (d > dFar) break;                       // já é o próximo tile
+        if (d < dNear) continue;                   // é a parede que sobe aqui
         const idx = y * COLS + cx;
         if (d > TUNE.dist){ cellChar[idx] = 0; continue; }
         const wx = px + rdx * d, wz = pz + rdz * d;
@@ -1664,6 +1674,23 @@ function renderWorld(){
       }
       yFill = y;
       if (yFill < 0) break;
+    }
+
+    /* --- névoa entre o alcance e o horizonte --------------------------
+       Depois do alcance de renderização não há mais mundo para desenhar,
+       mas ainda há tela: a faixa entre a última superfície e a linha do
+       horizonte. No nível da rua isso é uma tira de duas ou três linhas e
+       ninguém nota. De cima de um prédio o olho enxerga longe e essa
+       faixa vira um quinto da tela — que ficava PRETA, um buraco no meio
+       da cidade. Preenche com a própria névoa, que é para onde tudo já
+       estava caminhando: a 105 m o chão já está 91% névoa, então a
+       emenda não aparece. Fica com id e profundidade de céu, porque é o
+       que é: ali não há geometria nenhuma. Assim qualquer parede ainda
+       dentro do alcance passa na frente, e a silhueta dela contra a
+       névoa continua saindo do passe de contorno.                      */
+    for (let y = yFill; y >= 0; y--){
+      if (rowTan[y] >= -1e-6) break;                 // daqui para cima é céu
+      emit(y * COLS + cx, fogR, fogG, fogB);
     }
 
     /* --- paredes, do fundo para a frente --- */
@@ -1721,6 +1748,14 @@ function renderWorld(){
         const wy = eye + rowTan[y] * d;
         if (wy < 0) continue;
         const idx = y * COLS + cx;
+        /* O algoritmo do pintor resolve parede contra parede, mas o chão
+           foi pintado antes e não entrava na conta. No nível da rua isso
+           nunca aparecia: com o olho a 1,7 m, a base de uma parede a 40 m
+           cai logo abaixo do horizonte e a parede ocupa uma faixa fina.
+           De cima de um prédio o olho está a 77 m, a base da mesma parede
+           cai muito abaixo da tela, e ela passava a pintar a coluna
+           inteira — por cima da laje em que se está pisando. */
+        if (d >= cellDep[idx]) continue;
         cellDep[idx] = d;
         cellId[idx] = faceId;
 
@@ -1816,6 +1851,15 @@ function edgePass(){
 /* 7. sprites (postes e árvores) com teste de profundidade por coluna  */
 /* ------------------------------------------------------------------ */
 
+/** z-test de sprite, por célula.
+    O teste era por COLUNA, contra `zbuf` — a parede mais próxima daquela
+    coluna — e o chão não entrava na conta. No nível da rua isso passava
+    despercebido; de cima de um prédio, um poste ou uma árvore lá embaixo
+    apareciam por cima da laje em que se está pisando. A folga de 15 cm
+    existe para o sprite não se recortar contra o próprio chão onde pisa,
+    que está exatamente à mesma distância dele.                          */
+function spriteOK(i, t){ return t <= cellDep[i] + 0.15; }
+
 function spriteProject(wx, wz){
   const dx = wx - cam.x, dz = wz - cam.z;
   const t = dx * dirX + dz * dirZ;
@@ -1847,8 +1891,10 @@ function drawLamp(L){
     if (t >= zbuf[cx]) continue;
     const y0 = Math.max(0, Math.ceil(yTop)), y1 = Math.min(ROWS - 1, Math.floor(yBase));
     for (let y = y0; y <= y1; y++){
-      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid; cellId[y * COLS + cx] = sid;
-      emit(y * COLS + cx, pr * (1 - fog), pg * (1 - fog), pb * (1 - fog));
+      const ip = y * COLS + cx;
+      if (!spriteOK(ip, t)) continue;
+      cellDep[ip] = t; cellId[ip] = sid;
+      emit(ip, pr * (1 - fog), pg * (1 - fog), pb * (1 - fog));
     }
   }
   // luminária
@@ -1858,9 +1904,11 @@ function drawLamp(L){
     if (t >= zbuf[cx]) continue;
     const lampOn = clamp(ENV.neon * 1.25 - 0.12, 0, 1);
     for (let y = h0; y <= h1; y++){
-      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid;
+      const ih = y * COLS + cx;
+      if (!spriteOK(ih, t)) continue;
+      cellDep[ih] = t; cellId[ih] = sid;
       const g2 = 3.2 * (1 - fog) * (0.10 + 0.90 * lampOn);
-      emit(y * COLS + cx, L.r * g2, L.g * g2, L.b * g2);
+      emit(ih, L.r * g2, L.g * g2, L.b * g2);
     }
   }
 }
@@ -1883,8 +1931,10 @@ function drawTree(T){
   for (let cx = c0; cx <= c1; cx++){
     if (t >= zbuf[cx]) continue;
     for (let y = Math.max(0, Math.ceil(trunkTop)); y <= Math.min(ROWS - 1, Math.floor(yBase)); y++){
-      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid;
-      emit(y * COLS + cx, tr * (1 - fog), tg * (1 - fog), tb * (1 - fog));
+      const it = y * COLS + cx;
+      if (!spriteOK(it, t)) continue;
+      cellDep[it] = t; cellId[it] = sid;
+      emit(it, tr * (1 - fog), tg * (1 - fog), tb * (1 - fog));
     }
   }
 
@@ -1920,6 +1970,7 @@ function drawTree(T){
       if (d < 0.34) continue;                       // furos entre as folhas
       const k = (0.5 + 0.7 * d) * (1 - 0.42 * r * r) * (1 - fog);
       const i = y * COLS + cx;
+      if (!spriteOK(i, t)) continue;
       cellDep[i] = t; cellId[i] = sid;
       emit(i, lr * k, lg * k, lb * k);
     }
@@ -2055,6 +2106,7 @@ function drawArtSprite(wx, wz, yBase, ww, wh, art, r, g, b, flip){
       const ch = art.l[ay][ax];
       if (ch === " " || ch === undefined) continue;
       const i = y * COLS + cx;
+      if (!spriteOK(i, t)) continue;
       cellDep[i] = t; cellId[i] = sid;
       emitCharLit(i, ci(ch), r * k + 0.004, g * k + 0.004, b * k + 0.005);
     }
@@ -2228,6 +2280,7 @@ function drawGlyphMark(x, y, z, ch, r, g, b){
   const row = Math.round(rowAt(y - cam.eye, p.t));
   if (row < 0 || row >= ROWS) return;
   const i = row * COLS + cx;
+  if (!spriteOK(i, p.t)) return;
   cellDep[i] = p.t; cellId[i] = nextSpriteId();
   emitChar(i, ci(ch), r, g, b);
   cellPin[i] = 1;                      // um glifo só: o contorno o apagaria
@@ -2294,6 +2347,7 @@ function drawBeacon(bc){
   const cx = Math.round(p.col);
   if (cx < 0 || cx >= COLS || y < 0 || y >= ROWS || t >= zbuf[cx]) return;
   const i = y * COLS + cx;
+  if (!spriteOK(i, t)) return;
   cellDep[i] = t; cellId[i] = nextSpriteId();
   const k = on ? 3.4 : 0.25;
   emit(i, 1.0 * k, 0.22 * k, 0.18 * k);

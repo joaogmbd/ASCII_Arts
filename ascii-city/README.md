@@ -146,8 +146,47 @@ sem GPU nenhuma) contra ~55 ms da versão anterior.
 malha guarda a altura de cada tile em metros, e o DDA registra uma face nova
 sempre que a altura sobe em relação ao tile anterior — o que também expõe o
 prédio alto que está atrás do baixo. As faces são desenhadas do fundo para a
-frente, então a oclusão sai de graça. A marcha para assim que uma parede cobre
-o topo da tela: nada atrás dela pode aparecer.
+frente, então a oclusão entre paredes sai de graça. A marcha para assim que uma
+parede cobre o topo da tela: nada atrás dela pode aparecer.
+
+O pintor resolve parede contra parede, mas o chão é pintado antes e não entrava
+na conta — e os sprites testavam profundidade por **coluna**, contra a parede
+mais próxima dela, nunca contra o piso. No nível da rua isso nunca aparecia: com
+o olho a 1,7 m, a base de uma parede a 40 m cai logo abaixo do horizonte e a
+parede ocupa uma faixa fina da tela. De cima de um prédio o olho está a 77 m, a
+base da mesma parede cai muito abaixo da tela, e ela passava a pintar a coluna
+inteira — por cima da laje em que se estava pisando; um poste da rua lá embaixo
+fazia o mesmo. Hoje parede e sprite fazem z-test **por célula** contra o que já
+está lá. O sprite tem 15 cm de folga, senão se recortaria contra o próprio chão
+onde pisa, que está exatamente à mesma distância dele. Medido nas 8 linhas de
+baixo, de cima de um prédio de 76 m: eram 748 células de parede furando a laje,
+hoje são 0 em qualquer inclinação.
+
+**As duas pontas da marcha.** O z-test cobrou uma dívida antiga. A marcha de
+superfície limitava cada tile só pela distância de SAÍDA, nunca pela de entrada
+— e quando o raio sobe de degrau, ao sair da rua e entrar num telhado, a altura
+acima do chão despenca de 77 m para 1,7 m e com ela a distância que cada linha
+representa. O telhado de um prédio a 100 m se espalhava por linhas cuja
+distância real era de poucos metros, gravando profundidades 45 vezes menores que
+a verdadeira. Enquanto a parede pintava por cima sem perguntar nada, isso não
+aparecia; com o z-test, a parede perdia para a mancha e **sumia**. Essas linhas
+são exatamente as da parede que sobe ali, e é ela que tem de pintá-las: hoje a
+linha só é do tile enquanto a distância cai entre a entrada e a saída dele.
+
+O teste que guarda isso é geométrico, não visual: cada célula de chão afirma
+"a esta distância há superfície nesta altura", e o mundo tem de concordar —
+`heightAtTile` no ponto tem de dar a mesma altura. Sem a ponta de baixo dá 288
+células incoerentes de cima de um prédio, com erro de até 76 m, e **zero na
+rua**, que é a razão de o defeito só aparecer lá em cima.
+
+**Névoa até o horizonte.** Depois do alcance de renderização não há mais mundo
+para desenhar, mas ainda há tela: a faixa entre a última superfície e a linha do
+horizonte. Na rua são duas ou três linhas e ninguém nota; de cima de um prédio o
+olho enxerga longe e essa faixa chegava a **um quinto da tela**, preta, um
+buraco no meio da cidade. Hoje ela recebe a própria névoa — a 105 m o chão já
+está 91% névoa, então a emenda não aparece — com id e profundidade de céu,
+porque ali de fato não há geometria: qualquer parede dentro do alcance passa na
+frente, e a silhueta dela contra a névoa continua saindo do passe de contorno.
 
 **Chão e telhados na mesma marcha.** Um raycaster de modo texto normalmente
 desenha o piso por *floor casting*: para cada linha abaixo do horizonte, a
