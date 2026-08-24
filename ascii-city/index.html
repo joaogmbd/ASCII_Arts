@@ -1721,6 +1721,14 @@ function renderWorld(){
         const wy = eye + rowTan[y] * d;
         if (wy < 0) continue;
         const idx = y * COLS + cx;
+        /* O algoritmo do pintor resolve parede contra parede, mas o chão
+           foi pintado antes e não entrava na conta. No nível da rua isso
+           nunca aparecia: com o olho a 1,7 m, a base de uma parede a 40 m
+           cai logo abaixo do horizonte e a parede ocupa uma faixa fina.
+           De cima de um prédio o olho está a 77 m, a base da mesma parede
+           cai muito abaixo da tela, e ela passava a pintar a coluna
+           inteira — por cima da laje em que se está pisando. */
+        if (d >= cellDep[idx]) continue;
         cellDep[idx] = d;
         cellId[idx] = faceId;
 
@@ -1816,6 +1824,15 @@ function edgePass(){
 /* 7. sprites (postes e árvores) com teste de profundidade por coluna  */
 /* ------------------------------------------------------------------ */
 
+/** z-test de sprite, por célula.
+    O teste era por COLUNA, contra `zbuf` — a parede mais próxima daquela
+    coluna — e o chão não entrava na conta. No nível da rua isso passava
+    despercebido; de cima de um prédio, um poste ou uma árvore lá embaixo
+    apareciam por cima da laje em que se está pisando. A folga de 15 cm
+    existe para o sprite não se recortar contra o próprio chão onde pisa,
+    que está exatamente à mesma distância dele.                          */
+function spriteOK(i, t){ return t <= cellDep[i] + 0.15; }
+
 function spriteProject(wx, wz){
   const dx = wx - cam.x, dz = wz - cam.z;
   const t = dx * dirX + dz * dirZ;
@@ -1847,8 +1864,10 @@ function drawLamp(L){
     if (t >= zbuf[cx]) continue;
     const y0 = Math.max(0, Math.ceil(yTop)), y1 = Math.min(ROWS - 1, Math.floor(yBase));
     for (let y = y0; y <= y1; y++){
-      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid; cellId[y * COLS + cx] = sid;
-      emit(y * COLS + cx, pr * (1 - fog), pg * (1 - fog), pb * (1 - fog));
+      const ip = y * COLS + cx;
+      if (!spriteOK(ip, t)) continue;
+      cellDep[ip] = t; cellId[ip] = sid;
+      emit(ip, pr * (1 - fog), pg * (1 - fog), pb * (1 - fog));
     }
   }
   // luminária
@@ -1858,9 +1877,11 @@ function drawLamp(L){
     if (t >= zbuf[cx]) continue;
     const lampOn = clamp(ENV.neon * 1.25 - 0.12, 0, 1);
     for (let y = h0; y <= h1; y++){
-      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid;
+      const ih = y * COLS + cx;
+      if (!spriteOK(ih, t)) continue;
+      cellDep[ih] = t; cellId[ih] = sid;
       const g2 = 3.2 * (1 - fog) * (0.10 + 0.90 * lampOn);
-      emit(y * COLS + cx, L.r * g2, L.g * g2, L.b * g2);
+      emit(ih, L.r * g2, L.g * g2, L.b * g2);
     }
   }
 }
@@ -1883,8 +1904,10 @@ function drawTree(T){
   for (let cx = c0; cx <= c1; cx++){
     if (t >= zbuf[cx]) continue;
     for (let y = Math.max(0, Math.ceil(trunkTop)); y <= Math.min(ROWS - 1, Math.floor(yBase)); y++){
-      cellDep[y * COLS + cx] = t; cellId[y * COLS + cx] = sid;
-      emit(y * COLS + cx, tr * (1 - fog), tg * (1 - fog), tb * (1 - fog));
+      const it = y * COLS + cx;
+      if (!spriteOK(it, t)) continue;
+      cellDep[it] = t; cellId[it] = sid;
+      emit(it, tr * (1 - fog), tg * (1 - fog), tb * (1 - fog));
     }
   }
 
@@ -1920,6 +1943,7 @@ function drawTree(T){
       if (d < 0.34) continue;                       // furos entre as folhas
       const k = (0.5 + 0.7 * d) * (1 - 0.42 * r * r) * (1 - fog);
       const i = y * COLS + cx;
+      if (!spriteOK(i, t)) continue;
       cellDep[i] = t; cellId[i] = sid;
       emit(i, lr * k, lg * k, lb * k);
     }
@@ -2055,6 +2079,7 @@ function drawArtSprite(wx, wz, yBase, ww, wh, art, r, g, b, flip){
       const ch = art.l[ay][ax];
       if (ch === " " || ch === undefined) continue;
       const i = y * COLS + cx;
+      if (!spriteOK(i, t)) continue;
       cellDep[i] = t; cellId[i] = sid;
       emitCharLit(i, ci(ch), r * k + 0.004, g * k + 0.004, b * k + 0.005);
     }
@@ -2228,6 +2253,7 @@ function drawGlyphMark(x, y, z, ch, r, g, b){
   const row = Math.round(rowAt(y - cam.eye, p.t));
   if (row < 0 || row >= ROWS) return;
   const i = row * COLS + cx;
+  if (!spriteOK(i, p.t)) return;
   cellDep[i] = p.t; cellId[i] = nextSpriteId();
   emitChar(i, ci(ch), r, g, b);
   cellPin[i] = 1;                      // um glifo só: o contorno o apagaria
@@ -2294,6 +2320,7 @@ function drawBeacon(bc){
   const cx = Math.round(p.col);
   if (cx < 0 || cx >= COLS || y < 0 || y >= ROWS || t >= zbuf[cx]) return;
   const i = y * COLS + cx;
+  if (!spriteOK(i, t)) return;
   cellDep[i] = t; cellId[i] = nextSpriteId();
   const k = on ? 3.4 : 0.25;
   emit(i, 1.0 * k, 0.22 * k, 0.18 * k);

@@ -146,8 +146,21 @@ sem GPU nenhuma) contra ~55 ms da versão anterior.
 malha guarda a altura de cada tile em metros, e o DDA registra uma face nova
 sempre que a altura sobe em relação ao tile anterior — o que também expõe o
 prédio alto que está atrás do baixo. As faces são desenhadas do fundo para a
-frente, então a oclusão sai de graça. A marcha para assim que uma parede cobre
-o topo da tela: nada atrás dela pode aparecer.
+frente, então a oclusão entre paredes sai de graça. A marcha para assim que uma
+parede cobre o topo da tela: nada atrás dela pode aparecer.
+
+O pintor resolve parede contra parede, mas o chão é pintado antes e não entrava
+na conta — e os sprites testavam profundidade por **coluna**, contra a parede
+mais próxima dela, nunca contra o piso. No nível da rua isso nunca aparecia: com
+o olho a 1,7 m, a base de uma parede a 40 m cai logo abaixo do horizonte e a
+parede ocupa uma faixa fina da tela. De cima de um prédio o olho está a 77 m, a
+base da mesma parede cai muito abaixo da tela, e ela passava a pintar a coluna
+inteira — por cima da laje em que se estava pisando; um poste da rua lá embaixo
+fazia o mesmo. Hoje parede e sprite fazem z-test **por célula** contra o que já
+está lá. O sprite tem 15 cm de folga, senão se recortaria contra o próprio chão
+onde pisa, que está exatamente à mesma distância dele. Medido nas 8 linhas de
+baixo, de cima de um prédio de 76 m: eram 748 células de parede furando a laje,
+hoje são 0 em qualquer inclinação.
 
 **Chão e telhados na mesma marcha.** Um raycaster de modo texto normalmente
 desenha o piso por *floor casting*: para cada linha abaixo do horizonte, a
