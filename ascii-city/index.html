@@ -1620,13 +1620,22 @@ function renderWorld(){
     for (let k = 0; k <= nStep && yFill >= 0; k++){
       const h = stepH[k];
       if (h >= eye) break;
-      const dFar = k < nStep ? stepD[k + 1] : TUNE.dist;
+      const dNear = k === 0 ? 0.02 : stepD[k];
+      const dFar  = k < nStep ? stepD[k + 1] : TUNE.dist;
       const alt = eye - h;
       /* Em vez de resolver a linha inicial e a final (o que custaria dois
          arco-tangentes por passo), anda com a própria marca-d'água: cada
          linha sabe a sua tangente, então a distância sai direto, e a linha
-         só deixa de ser deste tile quando passa da saída dele. Assim cada
-         linha da coluna é visitada uma vez só na marcha inteira.        */
+         é deste tile só enquanto a distância cai entre a entrada e a saída
+         dele. Assim cada linha da coluna é visitada uma vez só na marcha.
+
+         As DUAS pontas importam. Quando o raio sobe de degrau — sai da rua
+         e entra num telhado — a altura acima do chão despenca, e com ela a
+         distância que cada linha representa: sem a ponta de baixo, o
+         telhado de um prédio a 100 m se espalhava por linhas cuja
+         distância real era de poucos metros, gravando profundidades muito
+         menores que a verdadeira. Essas linhas são justamente as da PAREDE
+         que sobe ali, e é a parede que tem de pintá-las.                */
       let y = yFill;
       luzX = 1e9; luzZ = 1e9;                    // memo de luz, um por tile
       for (; y >= 0; y--){
@@ -1634,6 +1643,7 @@ function renderWorld(){
         if (tg <= 1e-6){ y = -1; break; }          // desta linha para cima é céu
         const d = alt / tg;
         if (d > dFar) break;                       // já é o próximo tile
+        if (d < dNear) continue;                   // é a parede que sobe aqui
         const idx = y * COLS + cx;
         if (d > TUNE.dist){ cellChar[idx] = 0; continue; }
         const wx = px + rdx * d, wz = pz + rdz * d;
@@ -1664,6 +1674,23 @@ function renderWorld(){
       }
       yFill = y;
       if (yFill < 0) break;
+    }
+
+    /* --- névoa entre o alcance e o horizonte --------------------------
+       Depois do alcance de renderização não há mais mundo para desenhar,
+       mas ainda há tela: a faixa entre a última superfície e a linha do
+       horizonte. No nível da rua isso é uma tira de duas ou três linhas e
+       ninguém nota. De cima de um prédio o olho enxerga longe e essa
+       faixa vira um quinto da tela — que ficava PRETA, um buraco no meio
+       da cidade. Preenche com a própria névoa, que é para onde tudo já
+       estava caminhando: a 105 m o chão já está 91% névoa, então a
+       emenda não aparece. Fica com id e profundidade de céu, porque é o
+       que é: ali não há geometria nenhuma. Assim qualquer parede ainda
+       dentro do alcance passa na frente, e a silhueta dela contra a
+       névoa continua saindo do passe de contorno.                      */
+    for (let y = yFill; y >= 0; y--){
+      if (rowTan[y] >= -1e-6) break;                 // daqui para cima é céu
+      emit(y * COLS + cx, fogR, fogG, fogB);
     }
 
     /* --- paredes, do fundo para a frente --- */
