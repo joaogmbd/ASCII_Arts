@@ -2368,6 +2368,7 @@ function renderSprites(){
   }
   drawCars();
   drawPeds();
+  drawJogadores();
   drawDoorMarks();
 }
 
@@ -2527,6 +2528,7 @@ function update(dt){
   updateDrops(dt);
   portaPerto = acharPorta();
   somUpdate(dt);
+  netAtualiza(dt);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2671,6 +2673,387 @@ function somInit(){
 }
 
 /* ------------------------------------------------------------------ */
+/* 8c. arte de personagem                                              */
+/* ------------------------------------------------------------------ */
+/*  O jogador pode mandar um .txt com a própria arte. Como o arquivo vem
+    de qualquer lugar, nada de confiar no formato: braille vira rampa,
+    caractere fora do atlas vira espaço, e o tamanho é limitado — o
+    desenho ainda precisa caber numa figura de 1,8 m na tela dos outros. */
+
+const ART_MAX_W = 60, ART_MAX_H = 40;
+
+/** braille desenha em 2x4 pontos por caractere; a densidade de pontos
+    vira o glifo de mesma densidade na rampa, então o traço sobrevive */
+function brailleParaRampa(cod){
+  let n = 0, b = cod - 0x2800;
+  while (b){ n += b & 1; b >>= 1; }
+  const r = CHARSETS[1].ramp;                     // rampa densa, 15 níveis
+  return r[Math.min(r.length - 1, Math.round(n / 8 * (r.length - 1)))];
+}
+
+function arteDeTexto(txt, cor){
+  let l = String(txt).replace(/\r/g, "").split("\n");
+  while (l.length && !l[0].trim()) l.shift();
+  while (l.length && !l[l.length - 1].trim()) l.pop();
+  if (!l.length) return null;
+  l = l.slice(0, ART_MAX_H).map(linha => {
+    let fora = "";
+    for (const ch of linha.slice(0, ART_MAX_W)){
+      const c = ch.codePointAt(0);
+      if (c >= 0x2800 && c <= 0x28ff) fora += brailleParaRampa(c);
+      else if (ch === "\t") fora += "  ";
+      else fora += CHAR_IDX.has(ch) ? ch : " ";
+    }
+    return fora;
+  });
+  const w = Math.max(...l.map(x => x.length));
+  if (!w) return null;
+  return { l: l.map(x => x.padEnd(w, " ")), w, h: l.length,
+           cor: cor || [0.85, 0.90, 1.00] };
+}
+
+/* o boneco que veio junto do pedido, personagem padrão de todo mundo */
+const ARTE_PADRAO = arteDeTexto([
+  "     .///\\.",
+  "    //////\\\\",
+  "    (.)(.)-||",
+  "    | L    )|",
+  "    | _    /",
+  "    |____.'",
+  "    ___| |___",
+  "  .'         `.",
+  "  |           |",
+  "  | |      |  |",
+  "  | |      |  |",
+  "  | |      |  |",
+  "  | |      |  |",
+  "  | |      |  |",
+  "  |_|      |__|",
+  "   \\|_______\\/",
+  "     |     |",
+  "     |  |  |",
+  "     |  |  |",
+  "     |  |  |",
+  "     |  |  |",
+  "     |  |  |",
+  "     |  |  |",
+  "     |  |  |",
+  "    _|__|__|",
+  "   (__(____]"
+].join("\n"), [0.86, 0.92, 1.00]);
+
+/* o shape que veio junto, em braille */
+const ARTE_SKATE = arteDeTexto([
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⣠⡤⠶⠒⠓⠒⠒⠲⢤⢄⠀",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⣤⠶⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢷",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡴⠾⠉⠀⠀⠀⡴⢆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡤⠶⠛⠁⠀⢠⡀⠀⠀⠀⠀⠀⠀⠀⠘⠟⠂⠀⠀⡀⠾⠹",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⡀⡤⠶⠋⠉⠀⠀⠀⠀⠀⠙⠋⠀⠀⠀⢶⠀⠀⠀⠀⠀⡀⢠⢶⣿⠾⠋",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⢠⡴⠾⠋⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⡀⢠⢶⢿⣿⠋⠉⠀⠀",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⢤⠶⠋⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢠⢴⠿⢿⢷⣿⠟⠛⠲⢦⢄⠀",
+  "⠀⠀⠀⠀⠀⡀⡀⡤⠶⠋⠁⠀⠀⠀⢰⢾⢆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡀⣠⢖⢻⢿⢾⢍⡀⢸⠋⠀⢠⣿⢎⢧⠀",
+  "⠀⡀⡀⡤⠶⠛⠁⠀⠀⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⢷⠀⠀⠀⠀⢠⣠⡴⢺⢯⠾⠋⠉⠀⠀⠀⠀⢹⢀⠀⢸⠻⢷⠇⠀",
+  "⠾⠋⠉⠀⠀⠀⠀⠀⠘⠛⠀⠀⠀⡀⡀⠀⠀⠀⠀⠀⠀⡀⡀⢤⢞⢯⠿⠾⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠛⠲⠾⠟⠋⠀⠀",
+  "⣿⢦⢄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⠋⠀⠀⠀⡀⢠⠶⠋⢩⡞⠋⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+  "⠈⠓⠾⢯⠽⠛⠳⠶⠶⠦⢤⢤⢤⢤⢤⡤⠶⢞⢫⢵⠾⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+  "⠀⠀⠀⠀⠀⡏⠉⢻⢻⡏⠉⠛⠛⠛⠚⠓⢻⢏⢽⠾⠶⢤⢄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+  "⠀⠀⠀⠀⠀⠻⠦⢼⢄⠹⡿⠶⠤⢄⡀⠀⢸⡿⠁⠀⢀⡴⠋⣧⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠉⠁⠀⠀⠀⠀⠉⠑⢺⢃⠀⠀⢼⢫⢷⢺⢆⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⢧⠀⠀⣿⠈⢥⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+  "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠉⠙⢿⠟⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
+].join("\n"), [0.72, 0.80, 0.95]);
+
+let minhaArte = ARTE_PADRAO, minhaArteNome = "padrao";
+let meuNome = "jogador";
+
+function guardaPerfil(){
+  try {
+    localStorage.setItem("asciicity.nome", meuNome);
+    localStorage.setItem("asciicity.arteNome", minhaArteNome);
+    localStorage.setItem("asciicity.arte",
+      minhaArte === ARTE_PADRAO ? "" : minhaArte.l.join("\n"));
+  } catch (e) {}
+}
+function carregaPerfil(){
+  try {
+    meuNome = localStorage.getItem("asciicity.nome") || ("jogador" + ((Math.random() * 90 + 10) | 0));
+    const txt = localStorage.getItem("asciicity.arte");
+    if (txt){
+      const a = arteDeTexto(txt);
+      if (a){ minhaArte = a; minhaArteNome = localStorage.getItem("asciicity.arteNome") || "meu"; }
+    }
+  } catch (e) { meuNome = "jogador" + ((Math.random() * 90 + 10) | 0); }
+}
+carregaPerfil();
+
+/* ------------------------------------------------------------------ */
+/* 8d. multiplayer                                                     */
+/* ------------------------------------------------------------------ */
+/*  Um servidorzinho de Node segura a lista de sessões e reenvia estado.
+    A página vem dele, então o endereço do WebSocket sai do próprio
+    `location` e não há nada para configurar: abriu pelo http da rede,
+    o multiplayer já aparece no menu.
+
+    Toda sessão é multiplayer desde o primeiro segundo: ao conectar, quem
+    ainda não escolheu nada ganha a sua própria sessão, já listada, e o
+    amigo entra nela a qualquer hora. Entrar numa sessão troca a semente
+    do mundo pela do dono — é isso que faz a cidade ser a mesma.        */
+
+const NET = {
+  ws: null, estado: "off",          // off | ligando | on
+  eu: null, sessao: null, nomeSessao: "", erro: "",
+  lista: [], jog: new Map(),        // id -> jogador remoto
+  ultimoEnvio: 0, url: ""
+};
+
+function netURLPadrao(){
+  if (location.protocol === "file:") return "";
+  return (location.protocol === "https:" ? "wss://" : "ws://") + location.host;
+}
+
+function netConecta(url){
+  netDesliga();
+  NET.url = url || netURLPadrao();
+  if (!NET.url){ NET.erro = "abra o jogo pelo http do servidor"; return; }
+  NET.erro = ""; NET.estado = "ligando";
+  let ws;
+  try { ws = new WebSocket(NET.url); } catch (e){ NET.erro = "endereco invalido"; NET.estado = "off"; return; }
+  NET.ws = ws;
+  ws.onopen = () => {
+    NET.estado = "on";
+    ws.send(JSON.stringify({ t: "ola", nome: meuNome, semente: WSEED,
+                             arte: minhaArte === ARTE_PADRAO ? null : minhaArte }));
+  };
+  ws.onclose = () => { if (NET.ws === ws){ NET.estado = "off"; NET.jog.clear(); NET.sessao = null; } };
+  ws.onerror = () => { if (NET.ws === ws){ NET.erro = "nao consegui falar com o servidor"; } };
+  ws.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch (e) { return; } netRecebe(m); };
+}
+function netDesliga(){
+  if (NET.ws){ const w = NET.ws; NET.ws = null; try { w.close(); } catch (e) {} }
+  NET.estado = "off"; NET.jog.clear(); NET.sessao = null; NET.lista = [];
+}
+function netManda(m){ if (NET.ws && NET.estado === "on") try { NET.ws.send(JSON.stringify(m)); } catch (e) {} }
+
+function netRecebe(m){
+  switch (m.t){
+    case "eu":    NET.eu = m.id; break;
+    case "lista": NET.lista = m.s || []; break;
+    case "erro":  NET.erro = m.txt || ""; break;
+    case "entrou": {
+      NET.sessao = m.id; NET.nomeSessao = m.nome; NET.erro = "";
+      NET.jog.clear();
+      for (const j of m.jog || []) netAdiciona(j);
+      if ((m.semente >>> 0) !== (WSEED >>> 0)){    // o mundo passa a ser o dele
+        WSEED = m.semente >>> 0; resetCity(); memoReset(); respawn();
+      }
+      break;
+    }
+    case "jog":  netAdiciona(m); chatLinha("* " + m.nome + " entrou", UI.dim); break;
+    case "saiu": {
+      const j = NET.jog.get(m.id);
+      if (j) chatLinha("* " + j.nome + " saiu", UI.dim);
+      NET.jog.delete(m.id);
+      break;
+    }
+    case "arte": { const j = NET.jog.get(m.id); if (j) j.arte = netArte(m.arte); break; }
+    case "nome": { const j = NET.jog.get(m.id); if (j) j.nome = m.nome; break; }
+    case "est": {
+      for (const e of m.e || []){
+        if (e.id === NET.eu) continue;
+        const j = NET.jog.get(e.id);
+        if (!j) continue;
+        j.px = j.x; j.pz = j.z; j.py = j.y;        // de onde interpola
+        j.x = e.x; j.y = e.y; j.z = e.z; j.yaw = e.yaw; j.sk = e.sk; j.mv = e.mv;
+        j.t = 0;
+        if (!j.viu){ j.viu = true; j.ix = e.x; j.iy = e.y; j.iz = e.z; }
+      }
+      break;
+    }
+    case "chat": {
+      const j = NET.jog.get(m.id);
+      chatLinha(m.nome + ": " + m.txt, m.id === NET.eu ? UI.hi : UI.fg);
+      if (j){ j.chat = m.txt; j.chatAte = TIME + 6; }
+      if (m.id !== NET.eu) blaBla(m.txt, j);
+      break;
+    }
+  }
+}
+function netArte(a){
+  if (!a || !Array.isArray(a.l)) return ARTE_PADRAO;
+  const b = arteDeTexto(a.l.join("\n"), a.cor);
+  return b || ARTE_PADRAO;
+}
+function netAdiciona(j){
+  NET.jog.set(j.id, { id: j.id, nome: j.nome, arte: netArte(j.arte),
+                      x: 0, y: 0, z: 0, yaw: 0, sk: false, mv: 0,
+                      ix: 0, iy: 0, iz: 0, px: 0, py: 0, pz: 0, t: 1,
+                      viu: false, chat: "", chatAte: 0 });
+}
+
+/** manda o meu estado a 15 Hz e adianta a interpolação dos outros */
+function netAtualiza(dt){
+  if (NET.estado === "on" && NET.sessao){
+    NET.ultimoEnvio += dt;
+    if (NET.ultimoEnvio >= 1 / 15){
+      NET.ultimoEnvio = 0;
+      netManda({ t: "est", x: +cam.x.toFixed(2), y: +player.y.toFixed(2), z: +cam.z.toFixed(2),
+                 yaw: +cam.yaw.toFixed(2), sk: RIDE.on,
+                 mv: +Math.hypot(player.vx, player.vz).toFixed(1) });
+    }
+  }
+  /*  O estado chega a 15 Hz e a tela roda a 60: sem interpolar, o amigo
+      anda aos saltos. Persegue a última posição recebida no tempo de um
+      pulso, que é curto o bastante para não parecer atraso.            */
+  for (const j of NET.jog.values()){
+    if (!j.viu) continue;
+    j.t = Math.min(1, j.t + dt * 15);
+    const k = j.t * j.t * (3 - 2 * j.t);
+    j.ix = j.px + (j.x - j.px) * k;
+    j.iy = j.py + (j.y - j.py) * k;
+    j.iz = j.pz + (j.z - j.pz) * k;
+  }
+}
+
+/* ---- desenho dos outros jogadores ---------------------------------- */
+/** uma linha de texto no mundo, centrada, com teste de profundidade */
+function textoNoMundo(wx, wy, wz, txt, cor){
+  const p = spriteProject(wx, wz);
+  if (!p) return;
+  const row = Math.round(rowAt(wy - cam.eye, p.t));
+  if (row < 0 || row >= ROWS) return;
+  const x0 = Math.round(p.col - txt.length / 2);
+  for (let k = 0; k < txt.length; k++){
+    const x = x0 + k;
+    if (x < 0 || x >= COLS) continue;
+    const i = row * COLS + x;
+    if (!spriteOK(i, p.t)) continue;
+    cellDep[i] = p.t; cellId[i] = nextSpriteId();
+    emitChar(i, ci(txt[k]), cor[0], cor[1], cor[2]);
+    cellPin[i] = 1;
+  }
+}
+
+function drawJogadores(){
+  for (const j of NET.jog.values()){
+    if (!j.viu) continue;
+    const dx = j.ix - cam.x, dz = j.iz - cam.z;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > TUNE.dist * TUNE.dist) continue;
+    shade(j.ix, j.iy + 1.0, j.iz, -dirX, 0.25, -dirZ);
+    const lit = 0.2126 * sR + 0.7152 * sG + 0.0722 * sB + 0.05;
+    const a = j.arte || ARTE_PADRAO;
+    const alt = 1.80, base = j.iy + (j.sk ? 0.22 : 0);
+    /* o shape aparece por baixo de quem está andando de skate */
+    if (j.sk && ARTE_SKATE)
+      drawArtSprite(j.ix, j.iz, j.iy, 1.15, 0.42, ARTE_SKATE,
+                    ARTE_SKATE.cor[0] * lit, ARTE_SKATE.cor[1] * lit, ARTE_SKATE.cor[2] * lit, false);
+    const bal = j.mv > 0.4 ? Math.sin(TIME * 3.4 + j.ix) * 0.06 : 0;
+    /*  A largura sai da proporção do próprio desenho, não de um número
+        fixo: a célula do terminal é ~1:1.7, então uma arte de w x h
+        colunas ocupa w/(h*1.7) da altura dela. Sem isto toda arte
+        enviada sairia esticada ou espremida de um jeito diferente.   */
+    const larg = clamp(alt * (a.w / (a.h * 1.7)), 0.35, 2.6);
+    drawArtSprite(j.ix + bal, j.iz, base, larg, alt, a,
+                  a.cor[0] * lit, a.cor[1] * lit, a.cor[2] * lit, false);
+    /* nome sempre, e a última fala por alguns segundos */
+    const dist = Math.sqrt(d2);
+    if (dist < 60) textoNoMundo(j.ix, base + alt + 0.55, j.iz, j.nome, [0.55, 1.0, 0.75]);
+    if (j.chat && TIME < j.chatAte)
+      textoNoMundo(j.ix, base + alt + 1.25, j.iz,
+                   j.chat.length > 28 ? j.chat.slice(0, 27) + "…" : j.chat, [1.0, 0.88, 0.40]);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 8e. chat                                                            */
+/* ------------------------------------------------------------------ */
+/*  T abre a linha de texto, que é escrita na própria grade — o menu já
+    é uma TUI, o chat não seria diferente. Enquanto está aberta o
+    personagem não anda: as teclas viram letras.                        */
+
+let chatAberto = false, chatBuf = "";
+const chatLog = [];                          // { txt, cor, ate }
+
+function chatLinha(txt, cor){
+  chatLog.push({ txt, cor: cor || UI.fg, ate: TIME + 14 });
+  while (chatLog.length > 40) chatLog.shift();
+}
+function chatAbre(){
+  if (NET.estado !== "on") { chatLinha("* chat so no multiplayer", UI.dim); return; }
+  chatAberto = true; chatBuf = "";
+  keys.clear(); player.vx = player.vz = 0;
+}
+function chatFecha(envia){
+  if (envia && chatBuf.trim()) netManda({ t: "chat", txt: chatBuf.slice(0, 120) });
+  chatAberto = false; chatBuf = "";
+}
+function chatTecla(e){
+  if (e.key === "Enter"){ chatFecha(true); return true; }
+  if (e.key === "Escape"){ chatFecha(false); return true; }
+  if (e.key === "Backspace"){ chatBuf = chatBuf.slice(0, -1); return true; }
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey){
+    if (chatBuf.length < 120) chatBuf += e.key;
+    return true;
+  }
+  return true;                                // engole tudo enquanto aberto
+}
+function drawChat(){
+  const y0 = ROWS - (chatAberto ? 3 : 2);
+  let n = 0;
+  for (let k = chatLog.length - 1; k >= 0 && n < 6; k--){
+    const m = chatLog[k];
+    if (TIME > m.ate && !chatAberto) continue;   // some sozinho fora do chat
+    uiText(2, y0 - 1 - n, m.txt.slice(0, COLS - 4), m.cor);
+    n++;
+  }
+  if (chatAberto){
+    const cursor = ((TIME * 2) % 1) < 0.5 ? "_" : " ";
+    uiText(2, ROWS - 2, ("> " + chatBuf + cursor).slice(0, COLS - 4), UI.hi);
+  }
+}
+
+/* ---- "bla bla bla": um bipe a cada três letras --------------------- */
+/*  Osciladores, não arquivo: o Web Audio só engasga com mp3 vindo do
+    disco (origem opaca), e sintetizar não depende de arquivo nenhum,
+    então funciona tanto servido quanto aberto por duplo clique.        */
+let bipCtx = null;
+function bipCtxOk(){
+  if (bipCtx) return bipCtx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  try { bipCtx = new AC(); } catch (e) { return null; }
+  return bipCtx;
+}
+function blaBla(txt, quem){
+  if (!somOn) return;
+  const ctx = bipCtxOk();
+  if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  const n = Math.max(1, Math.min(14, Math.ceil(txt.replace(/\s/g, "").length / 3)));
+  /* volume pela distância de quem falou, como todo o resto do som */
+  let vol = 0.5;
+  if (quem && quem.viu){
+    const d = Math.hypot(quem.ix - cam.x, quem.iz - cam.z);
+    vol = 0.5 * Math.max(0.08, 1 - d / 45);
+  }
+  vol *= somVol;
+  const t0 = ctx.currentTime + 0.02;
+  const semente = (txt.charCodeAt(0) || 65) % 7;
+  for (let k = 0; k < n; k++){
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = "square";
+    /* a altura varia um pouco por sílaba: fica fala, não alarme */
+    osc.frequency.value = 300 + semente * 22 + ((k * 37) % 5) * 45;
+    const t = t0 + k * 0.085;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol * 0.09, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.065);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(t); osc.stop(t + 0.08);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* 9. entrada                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -2720,9 +3103,16 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* os atalhos continuam valendo — o menu é um caminho a mais, não o único */
 window.addEventListener("keydown", (e) => {
+  if (campoAtivo){ if (campoTecla(e)) e.preventDefault(); return; }
+  /* com o chat aberto as teclas viram letras, não comandos */
+  if (chatAberto){
+    if (chatTecla(e)) e.preventDefault();
+    return;
+  }
   if (e.repeat){ e.preventDefault(); return; }
   keys.add(e.code);
   switch (e.code){
+    case "KeyT": if (locked){ chatAbre(); e.preventDefault(); } break;
     case "Escape": if (locked) document.exitPointerLock?.(); break;
     case "KeyC": colorMode = !colorMode; break;
     case "KeyL": lightsOn = !lightsOn; break;
@@ -2896,6 +3286,36 @@ function uiSlider(x, y, w, label, v, min, max, txt){
   }
   return v;
 }
+/*  Campo de texto na grade. Um só pode estar em foco por vez, e
+    enquanto está o teclado vai todo para ele — mesma regra do chat. */
+let campoAtivo = null, campoBuf = "";
+function uiCampo(x, y, w, label, id, valor, dica){
+  const over = uiIn(x - 2, y, w + 2, 1);
+  const ativo = campoAtivo === id;
+  const mostra = ativo ? campoBuf + (((TIME * 2) % 1) < 0.5 ? "_" : " ")
+                       : (valor || dica || "");
+  uiRow(x, y, w, label, mostra.slice(-VALW), over,
+        ativo ? UI.hi : (valor ? UI.fg : UI.off));
+  if (over && mouseClick){ mouseClick = false; campoAtivo = id; campoBuf = valor || ""; }
+}
+function campoAplica(){
+  const v = campoBuf.trim();
+  if (campoAtivo === "nome" && v){ meuNome = v.slice(0, 16); guardaPerfil();
+    if (NET.estado === "on") netManda({ t: "ola", nome: meuNome, semente: WSEED }); }
+  if (campoAtivo === "servidor") netConecta(v);
+  campoAtivo = null; campoBuf = "";
+}
+function campoTecla(e){
+  if (e.key === "Enter"){ campoAplica(); return true; }
+  if (e.key === "Escape"){ campoAtivo = null; campoBuf = ""; return true; }
+  if (e.key === "Backspace"){ campoBuf = campoBuf.slice(0, -1); return true; }
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey){
+    if (campoBuf.length < 60) campoBuf += e.key;
+    return true;
+  }
+  return true;
+}
+
 function btnW(label){ return label.length + 4; }
 function uiButton(x, y, label, primary, forceCol){
   const s = "[ " + label + " ]";
@@ -2944,6 +3364,131 @@ function drawMinimap(x, y, n){
 }
 
 /* ---- o menu ------------------------------------------------------- */
+let menuAba = 0;                     // 0 jogo, 1 multiplayer, 2 personagem
+
+/** abre o seletor de arquivo e adota o .txt como personagem */
+function pedeArquivoArte(){
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".txt,text/plain";
+  inp.addEventListener("change", () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      const a = arteDeTexto(String(fr.result));
+      if (!a){ NET.erro = "esse txt nao tem desenho nenhum"; return; }
+      minhaArte = a;
+      minhaArteNome = f.name.replace(/\.[^.]*$/, "").slice(0, 18) || "meu";
+      guardaPerfil();
+      netManda({ t: "arte", arte: { l: a.l, cor: a.cor } });
+    };
+    fr.readAsText(f);
+  });
+  inp.click();
+}
+
+/* ---- aba MULTIPLAYER ------------------------------------------------ */
+function abaRede(items, px, PW, cx0, cw){
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "REDE LOCAL"));
+
+  if (location.protocol === "file:" && NET.estado === "off"){
+    items.push(y => uiText(cx0, y, "o jogo esta aberto direto do disco.", UI.dim));
+    items.push(y => uiText(cx0, y, "para jogar junto, um dos computadores roda", UI.dim));
+    items.push(y => uiText(cx0, y, "   node server.js", UI.acc));
+    items.push(y => uiText(cx0, y, "e todos abrem o http que ele imprimir.", UI.dim));
+    items.push(() => {});
+  }
+
+  items.push(y => {
+    const est = NET.estado === "on" ? "[ LIGADO ]"
+              : NET.estado === "ligando" ? "[ LIGANDO ]" : "[ DESLIGADO ]";
+    uiRow(cx0, y, cw, "conexao", est, false,
+          NET.estado === "on" ? UI.fg : UI.off);
+  });
+  items.push(y => uiCampo(cx0, y, cw, "seu nome", "nome", meuNome));
+  items.push(y => uiCampo(cx0, y, cw, "servidor", "servidor",
+                          NET.url, netURLPadrao() || "ws://ip:8080"));
+  items.push(y => {
+    const a1 = NET.estado === "off" ? "CONECTAR" : "DESCONECTAR";
+    let bx = px + 3;
+    if (uiButton(bx, y, a1, true)){
+      if (NET.estado === "off") netConecta(NET.url || netURLPadrao());
+      else netDesliga();
+    }
+    bx += btnW(a1) + 2;
+    if (NET.estado === "on" && uiButton(bx, y, "NOVA SESSAO"))
+      netManda({ t: "criar", nome: meuNome, semente: WSEED });
+  });
+  if (NET.erro) items.push(y => uiText(cx0, y, NET.erro.slice(0, cw), UI.hi));
+  items.push(() => {});
+
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "SESSOES"));
+  if (NET.estado !== "on"){
+    items.push(y => uiText(cx0, y, "conecte para ver quem esta jogando.", UI.dim));
+    return;
+  }
+  if (!NET.lista.length){
+    items.push(y => uiText(cx0, y, "ninguem online ainda.", UI.dim));
+    return;
+  }
+  /*  Toda sessão fica listada desde que alguém entra, então dá para cair
+      na de um amigo a qualquer hora — e o mundo passa a ser o dele.   */
+  for (const sess of NET.lista.slice(0, 8)){
+    const S = sess;
+    items.push(y => {
+      const minha = S.id === NET.sessao;
+      const quem = S.quem.join(", ");
+      const rot = (S.nome + " (" + S.n + ")").slice(0, cw - 14);
+      uiText(cx0, y, rot, minha ? UI.hi : UI.fg);
+      const bl = minha ? "SAIR" : "ENTRAR";
+      const bx = cx0 + cw - btnW(bl);
+      if (uiButton(bx, y, bl, !minha)){
+        if (minha) netManda({ t: "criar", nome: meuNome, semente: (Math.random() * 1e9) | 0 });
+        else netManda({ t: "entrar", id: S.id });
+      }
+      if (quem && cw > 30) uiText(cx0 + rot.length + 1, y,
+        (" " + quem).slice(0, cw - rot.length - btnW(bl) - 2), UI.dim);
+    });
+  }
+}
+
+/* ---- aba PERSONAGEM ------------------------------------------------- */
+function abaPersonagem(items, px, PW, cx0, cw){
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "SEU BONECO"));
+  items.push(y => uiRow(cx0, y, cw, "arte", minhaArteNome, false, UI.fg));
+  items.push(y => uiRow(cx0, y, cw, "tamanho",
+                        minhaArte.w + "x" + minhaArte.h, false, UI.dim));
+  items.push(y => {
+    let bx = px + 3;
+    if (uiButton(bx, y, "ENVIAR TXT", true)) pedeArquivoArte();
+    bx += btnW("ENVIAR TXT") + 2;
+    if (uiButton(bx, y, "USAR PADRAO")){
+      minhaArte = ARTE_PADRAO; minhaArteNome = "padrao";
+      guardaPerfil(); netManda({ t: "arte", arte: null });
+    }
+  });
+  items.push(() => {});
+  items.push(y => uiText(cx0, y, "um .txt com a arte. braille vira rampa,", UI.dim));
+  items.push(y => uiText(cx0, y, "e o que nao couber no atlas vira espaco.", UI.dim));
+  items.push(y => uiText(cx0, y, "fica guardado neste navegador: nao precisa", UI.dim));
+  items.push(y => uiText(cx0, y, "reenviar a cada sessao, o jogo manda sozinho.", UI.dim));
+  items.push(() => {});
+
+  /* prévia: o próprio desenho, do jeito que os amigos vão ver */
+  items.push(y => uiRule(cx0 - 1, y, cw + 2, "PREVIA"));
+  const a = minhaArte;
+  const linhas = Math.min(a.h, 16);
+  const passo = a.h / linhas;
+  for (let k = 0; k < linhas; k++){
+    const kk = k;
+    items.push(y => {
+      const src = a.l[Math.min(a.h - 1, Math.floor(kk * passo))];
+      uiCenter(px + 1, y, PW - 2, src.slice(0, PW - 4), UI.acc);
+    });
+  }
+}
+
 function drawMenu(){
   panelHit = false;
   const PW = clamp(COLS - 6, 34, 58);
@@ -2968,6 +3513,23 @@ function drawMenu(){
   });
   items.push(nop);
 
+  const abas = PW < 46 ? ["JOGO", "REDE", "BONECO"]
+                       : ["JOGO", "MULTIPLAYER", "PERSONAGEM"];
+  items.push(y => {
+    let x = px + 2;
+    for (let k = 0; k < abas.length; k++){
+      const rot = " " + abas[k] + " ";
+      const over = uiIn(x, y, rot.length, 1);
+      uiText(x, y, rot, k === menuAba ? UI.hi : (over ? UI.fg : UI.dim));
+      if (k === menuAba) uiText(x, y + 0, rot, UI.hi);
+      if (over && mouseClick){ mouseClick = false; menuAba = k; campoAtivo = null; }
+      x += rot.length + 1;
+    }
+    uiText(px + 1, y + 1, "-".repeat(PW - 2), UI.dim);
+  });
+  items.push(nop);
+
+  if (menuAba === 0){
   items.push(y => uiRule(cx0 - 1, y, cw + 2, "IMAGEM"));
   items.push(y => { if (uiToggle(cx0, y, cw, "cor", colorMode)) colorMode = !colorMode; });
   items.push(y => { if (uiToggle(cx0, y, cw, "contornos", edgesOn)) edgesOn = !edgesOn; });
@@ -3018,9 +3580,13 @@ function drawMenu(){
     items.push(nop);
     items.push(y => uiRule(cx0 - 1, y, cw + 2, "CONTROLES"));
     items.push(y => uiText(cx0, y, "WASD andar  MOUSE olhar  SHIFT correr  ESPACO pular", UI.dim));
-    items.push(y => uiText(cx0, y, "K pega o skate  E entra na porta  O contornos", UI.dim));
+    items.push(y => uiText(cx0, y, "K skate  E porta  T conversa  O contornos", UI.dim));
     items.push(y => uiText(cx0, y, "ESC abre este menu   -   clique fora dele para voltar", UI.dim));
   }
+
+  } else if (menuAba === 1) abaRede(items, px, PW, cx0, cw);
+  else abaPersonagem(items, px, PW, cx0, cw);
+
   items.push(nop);
   items.push(y => uiText(cx0, y, statsLine(), UI.dim));
 
@@ -3057,6 +3623,7 @@ function drawUI(){
     const txt = portaPerto.subir ? "[ E ]  SUBIR AO TOPO" : "[ E ]  DESCER";
     uiCenter(0, ROWS - 4, COLS, txt, UI.hi);
   }
+  if (locked || chatAberto || chatLog.length) drawChat();
   if (locked){ if (showStats) drawStats(); }
   else drawMenu();
   if (showMinimap){                                  // fica sempre na tela
@@ -3076,6 +3643,11 @@ initWeatherGlyphs();
 updateEnv();
 resize();
 respawn();
+
+/*  Servido por http, a rede liga sozinha: o endereço é o da própria
+    página, então abrir o link do amigo já coloca você na lista. Aberto
+    do disco não há servidor para falar, e a aba explica o que fazer.  */
+if (location.protocol !== "file:") netConecta(netURLPadrao());
 
 let last = performance.now();
 function frame(now){
