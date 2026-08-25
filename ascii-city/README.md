@@ -68,14 +68,14 @@ GPU nenhuma, numa janela de 1600×900):
 
 | célula | grade | células | ms/quadro |
 |---|---|---|---|
-| 14×25 | 114×36 | 4 104 | 4,2 |
-| 12×21 | 133×42 | 5 586 | 5,1 |
-| 10×17 | 160×52 | 8 320 | 6,7 |
-| 8×14 (padrão) | 200×64 | 12 800 | 9,3 |
-| 7×12 | 228×75 | 17 100 | 12 |
-| 6×10 | 266×90 | 23 940 | 15 |
-| 5×9 | 320×100 | 32 000 | 20 |
-| 4×7 | 400×128 | 51 200 | 26 |
+| 14×25 | 114×36 | 4 104 | 6,3 |
+| 12×21 | 133×42 | 5 586 | 7,7 |
+| 10×17 | 160×52 | 8 320 | 11 |
+| 8×14 (padrão) | 200×64 | 12 800 | 13 |
+| 7×12 | 228×75 | 17 100 | 16 |
+| 6×10 | 266×90 | 23 940 | 21 |
+| 5×9 | 320×100 | 32 000 | 26 |
+| 4×7 | 400×128 | 51 200 | 30 |
 
 Chegar nesses números pedia duas otimizações, porque na densidade máxima o
 quadro custava o triplo disso. A **curva de tom virou tabela**: exposição, gama
@@ -341,6 +341,68 @@ sobreposições e 100 % das caixas de rua com exatamente 12 m**.
 | postes | vão sorteado em [10 m, 15 m] e depois **corrigido** até caber de fato na faixa; altura em [4,2 m, 6,2 m]. Medido: menor distância real entre dois postes = 9,3 m |
 | outdoors e telões | fachada que dá para a rua, posição, tamanho, cor, texto e animação |
 | praças | 9 % dos quarteirões, com canteiros e arborização |
+
+### Alfabeto por material
+
+![legibilidade](docs/legibilidade.png)
+
+Durante um tempo tudo no jogo falou pelo **mesmo canal**: asfalto, calçada,
+fachada, laje e sprite viravam densidade de glifo a partir de luminância. Uma
+fachada a 0,30 de luminância e uma rua a 0,30 escolhiam o *mesmo caractere* —
+sobravam ~15 níveis para o mundo inteiro disputar, e a identidade de cada
+superfície se perdia. Somando a isso o grão que cada material tinha ganhado, a
+tela virou papa.
+
+Hoje cada classe tem o seu alfabeto, e eles são de **famílias diferentes**:
+
+| classe | alfabeto | família |
+|---|---|---|
+| céu | `. ' " ^` | aéreo |
+| asfalto | `. , : ; 8` | ponto |
+| calçada | `_ - = + #` | traço deitado |
+| verde | `. , v w W` | folha |
+| laje | `. ~ * % &` | cascalho |
+| fachada | `. ░ ▒ ▓ █` | massa |
+| poste, baliza | `o O 0 @` | redondo |
+
+**A forma carrega a identidade, o brilho carrega só a luz** — é assim que um
+roguelike se mantém legível: `#` é sempre parede, `.` é sempre chão. Os
+caracteres se repetem dentro de cada paleta de propósito: isso dá degraus de tom
+finos sem aumentar o número de formas na tela. As colisões que sobram são entre
+classes que nunca se encostam (laje e calçada são as duas chão, mas uma está lá
+em cima); o que precisa ser disjunto é o que divide aresta.
+
+Dá para desligar em `alfabeto por material`, no menu, e comparar.
+
+**O grão voltou a ser estrutural.** Havia aqui uma oitava fina que seguia a
+distância para dar ~2 células de tela por célula de ruído — ou seja, ruído quase
+na frequência da própria grade, o caso mais ilegível que existe. Dither funciona
+em pixel art porque o pixel é minúsculo; aqui cada "pixel" é uma letra com forma
+própria, e padrão do tamanho da célula é lido como **texto**, não como sombra.
+Ficaram as juntas, as emendas e a variação larga de remendo: padrões que o olho
+prevê.
+
+**E o contorno passou a ter limiar.** Antes bastava o vizinho estar um milímetro
+atrás para virar silhueta, e numa cidade densa isso é em toda parte — a linha
+era parte do ruído. Agora o salto precisa ser de 12% da distância, então um
+contorno voltou a significar "aqui termina um objeto".
+
+O efeito é medido, não impressão: contando pares de células vizinhas **da mesma
+classe** que trocam de glifo — que é o que o olho lê como chiado —
+
+| | antes | depois |
+|---|---|---|
+| ruído interno, tarde | 33,4 % | **7,4 %** |
+| ruído interno, noite | 33,1 % | **11,8 %** |
+| formas distintas no chão | 8–10 | **4–7** |
+| formas distintas na fachada | 15–19 | **9–10** |
+
+Um terço de todas as células vizinhas dentro de uma mesma superfície estava
+trocando de caractere. Isso é estática, não textura.
+
+Custa quadro, mas pouco: os blocos cobrem mais pixels que uma letra, então o
+`blit` escreve o dobro deles. No tamanho padrão o quadro não muda (11,5 ms
+contra 12,3 ms); na densidade máxima sobe de ~26 para ~30 ms.
 
 ### Chão
 
