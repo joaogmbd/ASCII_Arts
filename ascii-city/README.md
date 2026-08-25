@@ -8,12 +8,22 @@ HTML, sem dependências, sem build, sem servidor — e **sem WebGL**.
 
 ## Como rodar
 
-Abra `index.html` no navegador (duplo clique funciona — o arquivo é
-autocontido). Se preferir servir por HTTP:
+Abra `index.html` no navegador — duplo clique funciona, o arquivo é
+autocontido. Para jogar junto com alguém da mesma rede, um dos computadores
+sobe o servidor e todos abrem o endereço que ele imprimir:
 
 ```bash
-cd ascii-city && python3 -m http.server 8000   # http://localhost:8000
+cd ascii-city && node server.js          # porta 8080
 ```
+
+```
+ASCII CITY servindo em:
+  http://localhost:8080
+  http://192.168.0.14:8080   <- este para os amigos
+```
+
+O servidor não tem dependência nenhuma: `node server.js` e pronto, sem
+`npm install`. Ele serve o jogo e leva os jogadores de um lado para o outro.
 
 ## A interface é o próprio jogo
 
@@ -43,6 +53,7 @@ atalhos continuam valendo como caminho rápido:
 | `ESC` | abre o menu |
 | `C` | cor ↔ mono |
 | `E` | entrar na porta / descer do telhado |
+| `T` | conversa (multiplayer) |
 | `L` | luz dinâmica · `O` contornos · `M` minimapa |
 | `[` `]` | resolução (célula de 4×7 até 14×25 px) |
 | `1` `2` `3` `4` | conjunto de caracteres |
@@ -548,6 +559,86 @@ carro; a rampa de volume faz quase todo o trabalho sozinha. O navegador também
 só libera áudio depois de um gesto, então o clique que entra na cidade destrava
 as peças com um play mudo.
 
+## Multiplayer de rede local
+
+![multiplayer](docs/multiplayer.png)
+
+**Toda sessão é multiplayer desde o primeiro segundo.** Ao conectar, quem ainda
+não escolheu nada ganha a própria sessão, já anunciada na lista — o amigo entra
+nela a qualquer hora, sem combinar nada antes. Entrar numa sessão troca a
+semente do mundo pela do dono, e é isso que faz a cidade ser literalmente a
+mesma: a cidade é procedural e determinística, então **a semente é o mundo
+inteiro**. Não há mapa para transmitir; só um número de 32 bits.
+
+Servido por HTTP, a rede liga sozinha: o endereço do WebSocket sai do próprio
+`location`, então abrir o link do amigo já coloca você na lista. Aberto do disco
+não há servidor com quem falar, e a aba explica o que rodar.
+
+### Por que WebSocket
+
+Numa rede local o problema não é a conexão, é **achar os amigos** — e para isso
+alguém tem de manter a lista. WebRTC precisaria de um servidor de sinalização de
+qualquer jeito, ou seja, deste mesmo processo, e ainda traria ICE e travessia de
+NAT para uma rede que não tem NAT. WebSocket resolve os dois problemas com uma
+conexão só.
+
+O `server.js` não usa dependência nenhuma: o aperto de mão é um SHA-1 com um
+GUID fixo, e o enquadramento de quadros de texto (com máscara do cliente e
+fragmentação, que uma arte grande precisa) cabe em cem linhas. Assim o projeto
+continua sendo "baixar e rodar".
+
+| mensagem | vai | leva |
+|---|---|---|
+| `ola` | cliente → | nome, semente do mundo, arte |
+| `lista` | ← servidor | sessões, com quem está em cada uma |
+| `criar` / `entrar` | cliente → | abre a sua sessão ou cai na de um amigo |
+| `entrou` | ← servidor | semente da sessão e **a arte de todos que já estão lá** |
+| `est` | ambos | posição, olhar, skate e velocidade, a 15 Hz |
+| `chat` | ambos | a frase |
+
+O estado vai a 15 Hz e a tela roda a 60, então o amigo é interpolado no tempo de
+um pulso — sem isso ele andaria aos saltos.
+
+![vendo um amigo](docs/amigo.png)
+
+Cada jogador aparece com a arte dele, o nome flutuando em cima, o shape embaixo
+quando está de skate, e a última fala por alguns segundos.
+
+### Conversa, e o "bla bla bla"
+
+`T` abre a linha de texto, escrita na própria grade — o menu já é uma TUI, o
+chat não seria diferente. Enquanto está aberta o personagem não anda: as teclas
+viram letras.
+
+Quando alguém fala, o jogo emite **um bipe a cada três letras**. Dezesseis
+letras viram seis bipes; a frase mais longa satura em catorze. A altura muda um
+pouco por sílaba, então sai fala e não alarme, e o volume cai com a distância de
+quem falou, como todo o resto do som. São osciladores, não arquivo: o Web Audio
+só engasga com mp3 vindo do disco, e sintetizar não depende de arquivo nenhum.
+
+## O seu personagem
+
+![personagem](docs/personagem.png)
+
+A aba **PERSONAGEM** aceita um `.txt` com arte ASCII e adota o desenho como
+boneco. Como o arquivo vem de qualquer lugar, nada de confiar no formato:
+
+- **braille vira rampa.** O desenho em braille (`⣿⣦⣄`) usa 2×4 pontos por
+  caractere; a densidade de pontos vira o glifo de mesma densidade na rampa,
+  então o traço sobrevive sem precisar de 256 caracteres novos no atlas. É assim
+  que o shape do skate entrou.
+- **o que não está no atlas vira espaço**, e o tamanho é limitado a 60×40 — o
+  desenho ainda precisa caber numa figura de 1,8 m na tela dos outros.
+- **a largura sai da proporção do próprio desenho.** A célula do terminal é
+  ~1:1.7, então uma arte de `w × h` ocupa `w/(h·1.7)` da altura dela. Sem isso
+  cada arte enviada sairia esticada de um jeito diferente.
+
+**Não precisa reenviar a cada sessão.** A arte fica guardada neste navegador e
+vai sozinha na conexão; o servidor a mantém enquanto você estiver ligado e a
+entrega junto do `entrou`, então quem chega depois vê a sua e você vê a de todo
+mundo. O único momento em que ela viaja de novo é ao reconectar — e isso o jogo
+faz sem perguntar.
+
 ## O skate
 
 ![skate](docs/skate.png)
@@ -578,6 +669,7 @@ conjuntos de caracteres e seis tamanhos de célula trocam em tempo real:
 ## Próximos passos
 
 - interiores de verdade (hoje a porta teleporta)
+- voz de quem fala vindo da direção certa (o bipe hoje só tem volume)
 - pan estéreo dos sons, que pede servir por HTTP em vez de abrir do disco
 - manobras no skate (hoje só rola e freia)
 - áudio e controles de toque
@@ -597,6 +689,8 @@ histórico do git, em `178d2b8`.
   de quem a fez (lmg, anubis, mark, sk, ejm, jgs)
 - Carros: <https://ascii.co.uk/art/car> (ind, Lester, PS) — a assinatura foi
   recortada do sprite porque ficaria flutuando ao lado do veículo em movimento
+- Boneco padrão e shape do skate: artes enviadas pelo autor do pedido; o shape
+  veio em braille e passa pelo mesmo conversor que qualquer arte enviada
 - Sons: peças de `freesound.org`, nos nomes de arquivo em `assets/sounds/` —
   tanweraman (carro), perymarques (conversa), solarmusic (chuva com trovão),
   alex_jauk (trovão e rodovia), freesound_community (ambiente natural) e
